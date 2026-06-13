@@ -310,12 +310,29 @@ function ocrResponseSchema() {
       tags: { type: "array", items: { type: "string" }, description: "検索しやすいタグ。" },
       symptoms: { type: "array", items: { type: "string" }, description: "よくある症状やエラー。" },
       steps: { type: "array", items: { type: "string" }, description: "取説に書かれた操作や確認手順。" },
+      maintenanceTasks: {
+        type: "array",
+        description: "取説から読み取れる定期メンテナンス、清掃、交換、点検の予定候補。",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string", description: "カレンダーに入れる短いタスク名。" },
+            area: { type: "string", description: "場所。分からなければ空文字。" },
+            kind: { type: "string", enum: ["掃除", "点検", "交換", "連絡"], description: "予定の種類。" },
+            frequency: { type: "string", enum: ["none", "weekly", "monthly", "quarterly", "yearly"], description: "周期。" },
+            nextDate: { type: "string", description: "YYYY-MM-DD。具体日がなければ空文字。" },
+            note: { type: "string", description: "根拠になる取説の記載や補足。" }
+          },
+          required: ["title", "area", "kind", "frequency", "nextDate", "note"]
+        }
+      },
       content: { type: "string", description: "保存しておくべき要点のメモ。" },
       sourceText: { type: "string", description: "写真やPDFから読めた文字、表、警告、手順をできるだけ原文に近くまとめた本文。" },
       contact: { type: "string", description: "問い合わせ先。読み取れなければ空文字。" },
       cautions: { type: "string", description: "安全上の注意。読み取れなければ空文字。" }
     },
-    required: ["title", "room", "category", "modelNumber", "tags", "symptoms", "steps", "content", "sourceText", "contact", "cautions"]
+    required: ["title", "room", "category", "modelNumber", "tags", "symptoms", "steps", "maintenanceTasks", "content", "sourceText", "contact", "cautions"]
   };
 }
 
@@ -540,6 +557,8 @@ async function handleOcrManual(request, response) {
         "添付ソースに読める内容だけを使い、読めない項目は空文字または空配列にしてください。",
         "場所、分類、タグはソースから判断できる範囲で自動分類してください。判断材料が弱い場合は一般的すぎる分類にしてください。",
         "複数ページがある場合は、ページ間の重複を整理し、品番、エラー番号、警告、手順を取りこぼさないでください。",
+        "定期メンテナンス、清掃、交換、点検の周期が読める場合は maintenanceTasks に入れてください。",
+        `今日の日付は ${new Date().toISOString().slice(0, 10)} です。次回日が取説から分からない場合は nextDate を空文字にしてください。`,
         "読みにくい文字は推測せず、contentに「判読不明」と明記してください。",
         "ユーザーが後から検索しやすいよう、症状、エラー番号、掃除、交換、点検、問い合わせ先を優先して抜き出してください。",
         "危険や注意書きが読める場合は必ず cautions に要約してください。",

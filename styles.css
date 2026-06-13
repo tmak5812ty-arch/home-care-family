@@ -886,6 +886,55 @@ select:focus {
   color: #8f2634;
 }
 
+.event-pill.appointment {
+  background: #eef0e7;
+  color: #546157;
+}
+
+.badge.appointment {
+  background: #eef0e7;
+  color: #546157;
+}
+
+.year-overview {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.year-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.year-month {
+  display: grid;
+  gap: 3px;
+  min-height: 58px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf8;
+  color: var(--ink);
+  padding: 8px;
+  text-align: left;
+}
+
+.year-month.active {
+  border-color: var(--blue);
+  background: #edf3ef;
+}
+
+.year-month strong,
+.year-month span {
+  display: block;
+}
+
+.year-month span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .task-card {
   display: grid;
   gap: 10px;
@@ -1042,6 +1091,10 @@ select:focus {
   .calendar-weekdays,
   .calendar-grid {
     min-width: 620px;
+  }
+
+  .year-overview-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .day-cell {

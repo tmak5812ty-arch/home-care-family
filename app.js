@@ -57,6 +57,7 @@ const seedData = {
       nextDate: new Date().toISOString().slice(0, 10),
       frequency: "monthly",
       kind: "掃除",
+      entryType: "task",
       completed: []
     },
     {
@@ -66,6 +67,7 @@ const seedData = {
       nextDate: addDays(new Date(), 5).toISOString().slice(0, 10),
       frequency: "monthly",
       kind: "掃除",
+      entryType: "task",
       completed: []
     },
     {
@@ -75,6 +77,7 @@ const seedData = {
       nextDate: addDays(new Date(), 12).toISOString().slice(0, 10),
       frequency: "quarterly",
       kind: "点検",
+      entryType: "task",
       completed: []
     }
   ]
@@ -105,6 +108,7 @@ let sourcePhotoPayloads = [];
 let sourceFilePayloads = [];
 let pendingSources = [];
 let pendingSourceText = "";
+let pendingMaintenanceTasks = [];
 let aiStatus = { enabled: false, model: "" };
 let authStatus = { required: false, authenticated: true };
 let syncTimer = null;
@@ -189,7 +193,10 @@ readManualPhoto.addEventListener("click", async () => {
       : sourcePhotoPayloads.length || sourceFilePayloads.some((file) => file.kind === "pdf")
         ? "家族コードかSupabase設定がないため、原本保存はまだ行われていません。"
         : "";
-    ocrStatus.textContent = `AIが場所・分類・タグと内容を仮入力しました。${savedLabel} 違うところだけ直して保存してください。`;
+    const maintenanceLabel = pendingMaintenanceTasks.length
+      ? `メンテナンスタスク候補 ${pendingMaintenanceTasks.length}件も見つかりました。保存時にカレンダーへ追加します。`
+      : "";
+    ocrStatus.textContent = `AIが場所・分類・タグと内容を仮入力しました。${savedLabel} ${maintenanceLabel} 違うところだけ直して保存してください。`;
   } catch (error) {
     ocrStatus.textContent = `読み取りに失敗しました。${error.message ? ` ${error.message.slice(0, 80)}` : ""}`;
   } finally {
@@ -223,6 +230,7 @@ manualForm.addEventListener("submit", (event) => {
   } else {
     state.manuals.unshift(manual);
   }
+  addPendingMaintenanceTasks(manual);
   persist();
   resetManualForm();
   renderAll();
@@ -236,6 +244,7 @@ taskForm.addEventListener("submit", (event) => {
   const existing = state.tasks.find((item) => item.id === id);
   const task = {
     id,
+    entryType: form.get("entryType") === "on" ? "task" : "event",
     title: form.get("title").trim(),
     area: form.get("area").trim(),
     nextDate: form.get("nextDate"),
@@ -256,12 +265,22 @@ taskForm.addEventListener("submit", (event) => {
 
 document.querySelector("#prevMonth").addEventListener("click", () => {
   activeMonth = new Date(activeMonth.getFullYear(), activeMonth.getMonth() - 1, 1);
-  renderCalendar();
+  renderCalendarViews();
 });
 
 document.querySelector("#nextMonth").addEventListener("click", () => {
   activeMonth = new Date(activeMonth.getFullYear(), activeMonth.getMonth() + 1, 1);
-  renderCalendar();
+  renderCalendarViews();
+});
+
+document.querySelector("#prevYear").addEventListener("click", () => {
+  activeMonth = new Date(activeMonth.getFullYear() - 1, activeMonth.getMonth(), 1);
+  renderCalendarViews();
+});
+
+document.querySelector("#nextYear").addEventListener("click", () => {
+  activeMonth = new Date(activeMonth.getFullYear() + 1, activeMonth.getMonth(), 1);
+  renderCalendarViews();
 });
 
 document.querySelector("#exportData").addEventListener("click", () => {
@@ -325,6 +344,10 @@ document.querySelector("#cancelTaskEdit").addEventListener("click", () => {
   resetTaskForm();
 });
 
+taskForm.elements.entryType.addEventListener("change", () => {
+  document.querySelector("#taskSubmitButton").textContent = taskForm.elements.entryType.checked ? "タスクを保存" : "予定を保存";
+});
+
 document.addEventListener("click", (event) => {
   const action = event.target.closest("[data-action]");
   if (!action) return;
@@ -337,6 +360,10 @@ document.addEventListener("click", (event) => {
   if (name === "edit-task") editTask(id);
   if (name === "quick-add-task") quickAddTask();
   if (name === "add-task-date") quickAddTask(id);
+  if (name === "jump-month") {
+    activeMonth = parseLocalDate(id);
+    renderCalendarViews();
+  }
 });
 
 renderAll();
@@ -384,6 +411,9 @@ function normalizeState(rawState) {
       nextDate: task.nextDate || toDateKey(new Date()),
       frequency: task.frequency || "none",
       kind: task.kind || "掃除",
+      entryType: task.entryType || "task",
+      sourceManualId: task.sourceManualId || "",
+      note: task.note || "",
       completed: Array.isArray(task.completed) ? task.completed : []
     })),
     updatedAt: rawState.updatedAt || ""
@@ -400,6 +430,43 @@ function normalizeSource(source) {
     bucket: source.bucket || "",
     createdAt: source.createdAt || ""
   };
+}
+
+function normalizeMaintenanceTasks(tasks) {
+  return tasks
+    .map((task) => ({
+      title: String(task.title || "").trim(),
+      area: String(task.area || "").trim(),
+      kind: ["掃除", "点検", "交換", "連絡"].includes(task.kind) ? task.kind : "点検",
+      frequency: ["none", "weekly", "monthly", "quarterly", "yearly"].includes(task.frequency) ? task.frequency : "none",
+      nextDate: /^\d{4}-\d{2}-\d{2}$/.test(String(task.nextDate || "")) ? task.nextDate : toDateKey(new Date()),
+      note: String(task.note || "").trim()
+    }))
+    .filter((task) => task.title);
+}
+
+function addPendingMaintenanceTasks(manual) {
+  if (!pendingMaintenanceTasks.length) return;
+  pendingMaintenanceTasks.forEach((candidate) => {
+    const task = {
+      id: crypto.randomUUID(),
+      entryType: "task",
+      title: candidate.title,
+      area: candidate.area || manual.room || "",
+      nextDate: candidate.nextDate || toDateKey(new Date()),
+      frequency: candidate.frequency || "none",
+      kind: candidate.kind || "点検",
+      sourceManualId: manual.id,
+      note: candidate.note || `取説「${manual.title}」から自動追加`,
+      completed: []
+    };
+    const exists = state.tasks.some((item) =>
+      item.sourceManualId === manual.id
+      && item.title === task.title
+      && item.frequency === task.frequency
+    );
+    if (!exists) state.tasks.push(task);
+  });
 }
 
 async function renderAiSettings() {
@@ -526,7 +593,7 @@ function switchView(viewName) {
 function renderAll() {
   renderManuals();
   renderTasks();
-  renderCalendar();
+  renderCalendarViews();
   renderMiniCalendar();
   renderUpcoming();
   renderTodayTasks();
@@ -801,7 +868,7 @@ function renderTodayTasks() {
   list.innerHTML = "";
   const todayKey = toDateKey(new Date());
   const tasks = state.tasks
-    .filter((task) => task.nextDate <= todayKey)
+    .filter((task) => task.entryType !== "event" && task.nextDate <= todayKey)
     .sort((a, b) => a.nextDate.localeCompare(b.nextDate));
 
   if (!tasks.length) {
@@ -854,11 +921,40 @@ function renderCalendar() {
 
     cell.innerHTML = `
       <span class="day-number">${date.getDate()}${dayTasks.length ? `<span>${dayTasks.length}件</span>` : ""}</span>
-      ${dayTasks.map((task) => `<span class="event-pill ${isOverdue(task) ? "overdue" : ""}">${escapeHtml(task.title)}</span>`).join("")}
+      ${dayTasks.map((task) => `<span class="event-pill ${task.entryType === "event" ? "appointment" : ""} ${task.entryType !== "event" && isOverdue(task) ? "overdue" : ""}">${escapeHtml(task.title)}</span>`).join("")}
     `;
     cell.dataset.action = "add-task-date";
     cell.dataset.id = dateKey;
     grid.append(cell);
+  }
+}
+
+function renderCalendarViews() {
+  renderCalendar();
+  renderYearOverview();
+}
+
+function renderYearOverview() {
+  const grid = document.querySelector("#yearOverviewGrid");
+  const label = document.querySelector("#yearOverviewLabel");
+  if (!grid || !label) return;
+  grid.innerHTML = "";
+  const year = activeMonth.getFullYear();
+  label.textContent = `${year}年`;
+  for (let month = 0; month < 12; month += 1) {
+    const monthStart = new Date(year, month, 1);
+    const monthEnd = new Date(year, month + 1, 0);
+    const count = state.tasks.filter((task) => {
+      const date = parseLocalDate(task.nextDate);
+      return date >= monthStart && date <= monthEnd;
+    }).length;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `year-month ${month === activeMonth.getMonth() ? "active" : ""}`;
+    button.dataset.action = "jump-month";
+    button.dataset.id = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+    button.innerHTML = `<strong>${month + 1}月</strong><span>${count}件</span>`;
+    grid.append(button);
   }
 }
 
@@ -905,13 +1001,13 @@ function taskMarkup(task, withActions) {
     <div class="card-top">
       <div>
         <h3 class="card-title">${escapeHtml(task.title)}</h3>
-        <p class="meta-line">${escapeHtml(task.area)} / 次回 ${formatShortDate(task.nextDate)} / ${frequencyLabel(task.frequency)}</p>
+        <p class="meta-line">${escapeHtml(task.area)} / ${task.entryType === "event" ? "予定" : "次回"} ${formatShortDate(task.nextDate)} / ${frequencyLabel(task.frequency)}</p>
       </div>
-      <span class="badge ${kindClass}">${escapeHtml(task.kind)}</span>
+      <span class="badge ${task.entryType === "event" ? "appointment" : kindClass}">${task.entryType === "event" ? "予定" : escapeHtml(task.kind)}</span>
     </div>
     ${withActions ? `
       <div class="task-actions">
-        <button class="small-button check-action" data-action="toggle-task" data-id="${task.id}" type="button">✓ 完了</button>
+        ${task.entryType === "event" ? "" : `<button class="small-button check-action" data-action="toggle-task" data-id="${task.id}" type="button">✓ 完了</button>`}
         <button class="small-button" data-action="edit-task" data-id="${task.id}" type="button">編集</button>
         <button class="small-button danger-button" data-action="delete-task" data-id="${task.id}" type="button">削除</button>
       </div>
@@ -932,6 +1028,7 @@ function editManual(id) {
   manualForm.elements.content.value = manual.content;
   pendingSources = manual.sources || [];
   pendingSourceText = manual.sourceText || "";
+  pendingMaintenanceTasks = [];
   document.querySelector("#manualSubmitButton").textContent = "取説を更新";
   document.querySelector("#cancelManualEdit").hidden = false;
   switchView("manuals");
@@ -943,6 +1040,7 @@ function resetManualForm() {
   manualForm.elements.id.value = "";
   pendingSources = [];
   pendingSourceText = "";
+  pendingMaintenanceTasks = [];
   document.querySelector("#manualSubmitButton").textContent = "取説を保存";
   document.querySelector("#cancelManualEdit").hidden = true;
   resetSourcePreview();
@@ -957,7 +1055,8 @@ function editTask(id) {
   taskForm.elements.nextDate.value = task.nextDate;
   taskForm.elements.frequency.value = task.frequency;
   taskForm.elements.kind.value = task.kind;
-  document.querySelector("#taskSubmitButton").textContent = "予定を更新";
+  taskForm.elements.entryType.checked = task.entryType !== "event";
+  document.querySelector("#taskSubmitButton").textContent = task.entryType === "event" ? "予定を更新" : "タスクを更新";
   document.querySelector("#cancelTaskEdit").hidden = false;
   switchView("calendar");
   taskForm.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -966,7 +1065,8 @@ function editTask(id) {
 function resetTaskForm() {
   taskForm.reset();
   taskForm.elements.id.value = "";
-  document.querySelector("#taskSubmitButton").textContent = "予定を保存";
+  taskForm.elements.entryType.checked = true;
+  document.querySelector("#taskSubmitButton").textContent = "タスクを保存";
   document.querySelector("#cancelTaskEdit").hidden = true;
 }
 
@@ -984,6 +1084,7 @@ function toggleTask(id) {
 function completeTask(id) {
   const task = state.tasks.find((item) => item.id === id);
   if (!task) return;
+  if (task.entryType === "event") return;
   task.completed.push(new Date().toISOString());
   if (task.frequency === "none") {
     state.tasks = state.tasks.filter((item) => item.id !== id);
@@ -1072,7 +1173,7 @@ function updateSourceReadiness(resetMessage = false) {
   readManualPhoto.disabled = total === 0;
   clearManualPhoto.disabled = total === 0;
   if (resetMessage) {
-    ocrStatus.textContent = "写真・PDF・テキストを選べます。元ファイルは保存せず、読み取った要点だけフォームへ転記します。";
+    ocrStatus.textContent = "写真・PDF・テキストを選べます。原本はSupabaseへ保存し、読み取った要点もフォームへ転記します。";
     return;
   }
   if (total > 0) {
@@ -1125,6 +1226,9 @@ function applyOcrResult(data) {
   if (Array.isArray(data.tags)) fields.tags.value = mergeTextList(fields.tags.value, data.tags, "、");
   if (Array.isArray(data.symptoms)) fields.symptoms.value = mergeTextList(fields.symptoms.value, data.symptoms, "\n");
   if (Array.isArray(data.steps)) fields.steps.value = mergeTextList(fields.steps.value, data.steps, "\n");
+  if (Array.isArray(data.maintenanceTasks)) {
+    pendingMaintenanceTasks = normalizeMaintenanceTasks(data.maintenanceTasks);
+  }
   if (Array.isArray(data.storedSources) && data.storedSources.length) {
     pendingSources = mergeSources(pendingSources, data.storedSources);
   }
@@ -1255,7 +1359,7 @@ function scheduleReminders() {
 function notifyDueTasks(force) {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   const todayKey = toDateKey(new Date());
-  const dueTasks = state.tasks.filter((task) => task.nextDate <= todayKey);
+  const dueTasks = state.tasks.filter((task) => task.entryType !== "event" && task.nextDate <= todayKey);
   dueTasks.forEach((task) => {
     const notifyKey = `${todayKey}:${task.id}`;
     if (!force && notifiedTaskKeys.has(notifyKey)) return;

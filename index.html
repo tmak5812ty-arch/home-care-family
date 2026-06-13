@@ -165,6 +165,7 @@
                   <ol>
                     <li>紙の取説はまとめて撮影、PDFやメモはファイルで選択します。</li>
                     <li>「ソースを読み取る」を押すと、場所・分類・タグをAIが仮入力します。</li>
+                    <li>清掃や交換周期が読めた場合は、保存時にカレンダーへタスク追加します。</li>
                     <li>内容を確認して、違うところだけ直して保存します。</li>
                   </ol>
                 </div>
@@ -193,7 +194,7 @@
                     <button id="readManualPhoto" class="small-button" type="button" disabled>ソースを読み取る</button>
                     <button id="clearManualPhoto" class="small-button" type="button" disabled>選択を消す</button>
                   </div>
-                  <p class="muted" id="ocrStatus">写真・PDF・テキストを選べます。元ファイルは保存せず、読み取った要点だけフォームへ転記します。</p>
+                  <p class="muted" id="ocrStatus">写真・PDF・テキストを選べます。原本はSupabaseへ保存し、読み取った要点もフォームへ転記します。</p>
                 </div>
                 <label>取説メモ・転記内容<textarea name="content" placeholder="品番、注意点、エラー番号、問い合わせ先など"></textarea></label>
                 <div class="task-actions">
@@ -207,9 +208,11 @@
 
         <section class="view" id="calendar">
           <div class="calendar-toolbar">
+            <button class="icon-button" id="prevYear" type="button" aria-label="前年">«</button>
             <button class="icon-button" id="prevMonth" type="button" aria-label="前の月">‹</button>
             <h2 id="monthLabel"></h2>
             <button class="icon-button" id="nextMonth" type="button" aria-label="次の月">›</button>
+            <button class="icon-button" id="nextYear" type="button" aria-label="翌年">»</button>
           </div>
 
           <div class="calendar-layout">
@@ -218,6 +221,15 @@
                 <span>日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span>
               </div>
               <div id="calendarGrid" class="calendar-grid"></div>
+              <section class="year-overview" aria-label="一年分の予定">
+                <div class="panel-heading compact-heading">
+                  <div>
+                    <p class="eyebrow">YEAR</p>
+                    <h2 id="yearOverviewLabel"></h2>
+                  </div>
+                </div>
+                <div id="yearOverviewGrid" class="year-overview-grid"></div>
+              </section>
             </section>
 
             <section class="panel form-panel">
@@ -229,9 +241,10 @@
               </div>
               <form id="taskForm" class="data-form">
                 <input name="id" type="hidden">
+                <label class="checkbox-line"><input name="entryType" type="checkbox" checked> 完了チェックできるタスクにする</label>
                 <label>内容<input name="title" required placeholder="例: エアコンフィルター掃除"></label>
                 <label>場所<input name="area" required placeholder="例: リビング"></label>
-                <label>次回日<input name="nextDate" required type="date"></label>
+                <label>日付<input name="nextDate" required type="date"></label>
                 <label>周期
                   <select name="frequency">
                     <option value="none">1回のみ</option>
@@ -250,7 +263,7 @@
                   </select>
                 </label>
                 <div class="task-actions">
-                  <button id="taskSubmitButton" class="primary-button" type="submit">予定を保存</button>
+                  <button id="taskSubmitButton" class="primary-button" type="submit">タスクを保存</button>
                   <button id="cancelTaskEdit" class="small-button" type="button" hidden>編集をやめる</button>
                 </div>
               </form>
