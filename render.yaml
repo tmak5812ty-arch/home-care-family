@@ -2,7 +2,7 @@ services:
   - type: web
     name: home-care-family-app
     runtime: docker
-    plan: starter
+    plan: free
     autoDeploy: true
     healthCheckPath: /api/status
     envVars:
@@ -10,11 +10,5 @@ services:
         value: 0.0.0.0
       - key: OPENAI_MODEL
         value: gpt-5-mini
-      - key: DATA_DIR
-        value: /data
       - key: OPENAI_API_KEY
         sync: false
-    disk:
-      name: home-care-data
-      mountPath: /data
-      sizeGB: 1

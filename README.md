@@ -31,7 +31,7 @@ docker run -p 4173:4173 -e OPENAI_API_KEY=... -v home-care-data:/app/data -e DAT
 - `PORT`: ホスティング側が指定するポート
 - `OPENAI_API_KEY`: AI回答を使う場合
 - `OPENAI_MODEL=gpt-5-mini`
-- `DATA_DIR`: 共有データを保存する永続ディスクのパス
+- `DATA_DIR`: 共有データを保存する永続ディスクのパス。無料Render構成では未設定のため、サーバー再起動時に共有データが消える可能性があります。
 
 家族は同じ公開URLを開き、「データ管理」の家族共有で同じ家族コードを設定します。
 
