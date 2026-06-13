@@ -80,11 +80,14 @@ function hasSupabaseStore() {
 }
 
 async function supabaseRequest(pathname, options = {}) {
+  const authHeaders = supabaseServiceRoleKey.startsWith("sb_secret_")
+    ? {}
+    : { Authorization: `Bearer ${supabaseServiceRoleKey}` };
   const response = await fetch(`${supabaseUrl}/rest/v1/${pathname}`, {
     ...options,
     headers: {
       apikey: supabaseServiceRoleKey,
-      Authorization: `Bearer ${supabaseServiceRoleKey}`,
+      ...authHeaders,
       "Content-Type": "application/json",
       ...(options.headers || {})
     }
