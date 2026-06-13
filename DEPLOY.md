@@ -7,15 +7,35 @@
 - `HOST=0.0.0.0`
 - `OPENAI_API_KEY`: AI回答を使う場合のみ
 - `OPENAI_MODEL=gpt-5-mini`
-- `DATA_DIR`: 永続保存ディスクのパス
+- `SUPABASE_URL`: Supabaseへ家族共有データを保存する場合
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabaseへ家族共有データを保存する場合。ブラウザには出さず、サーバー環境変数にだけ設定します。
+- `SUPABASE_TABLE=home_care_shared_data`
+- `DATA_DIR`: ファイル保存を使う場合の永続保存ディスクのパス
+
+## Supabase無料枠
+
+SupabaseのSQL Editorで次を実行します。
+
+```sql
+create table if not exists public.home_care_shared_data (
+  family_hash text primary key,
+  data jsonb not null default '{"manuals":[],"tasks":[]}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.home_care_shared_data enable row level security;
+```
+
+Renderの環境変数に `SUPABASE_URL` と `SUPABASE_SERVICE_ROLE_KEY` を設定すると、無料Renderでも家族共有データをSupabaseに永続保存できます。未設定の場合は従来通りファイル保存に戻ります。
 
 ## Render
 
 1. このフォルダをGitHubリポジトリへアップロードします。
 2. Renderで「New Blueprint」を選び、GitHubリポジトリを接続します。
 3. `render.yaml` が読み込まれます。
-4. `OPENAI_API_KEY` をRenderの環境変数に設定します。
-5. Deploy後に発行される `https://...onrender.com` が家族共有URLです。
+4. `SUPABASE_URL` と `SUPABASE_SERVICE_ROLE_KEY` をRenderの環境変数に設定します。
+5. AI回答や写真読み取りを使う場合は `OPENAI_API_KEY` も設定します。
+6. Deploy後に発行される `https://...onrender.com` が家族共有URLです。
 
 RenderはDockerfileからWebサービスをビルドできます。Blueprintは `render.yaml` でサービスや環境変数を定義します。
 

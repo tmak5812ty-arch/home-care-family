@@ -32,8 +32,27 @@ docker run -p 4173:4173 -e OPENAI_API_KEY=... -v home-care-data:/app/data -e DAT
 - `OPENAI_API_KEY`: AI回答を使う場合
 - `OPENAI_MODEL=gpt-5-mini`
 - `DATA_DIR`: 共有データを保存する永続ディスクのパス。無料Render構成では未設定のため、サーバー再起動時に共有データが消える可能性があります。
+- `SUPABASE_URL`: SupabaseプロジェクトURL。設定すると家族共有データをSupabaseへ保存します。
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabaseのservice_role key。サーバー環境変数にだけ設定します。
+- `SUPABASE_TABLE=home_care_shared_data`
 
 家族は同じ公開URLを開き、「データ管理」の家族共有で同じ家族コードを設定します。
+
+## Supabase無料枠で共有データを保存
+
+Supabaseで新規プロジェクトを作り、SQL Editorで次を実行します。
+
+```sql
+create table if not exists public.home_care_shared_data (
+  family_hash text primary key,
+  data jsonb not null default '{"manuals":[],"tasks":[]}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.home_care_shared_data enable row level security;
+```
+
+Renderの環境変数に `SUPABASE_URL` と `SUPABASE_SERVICE_ROLE_KEY` を設定すると、家族共有の保存先がSupabaseになります。service_role keyはブラウザには送られず、Renderサーバー内だけで使います。
 
 Render / Railway / Fly.io / VPSへの公開手順は [DEPLOY.md](/Users/yokotatomoaki/Documents/家の管理/DEPLOY.md) にまとめています。
 

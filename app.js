@@ -355,9 +355,10 @@ async function renderAiSettings() {
       enabled: Boolean(data.aiEnabled),
       model: data.aiModel || ""
     };
+    const storageLabel = data.sharedStorage === "supabase" ? "共有保存: Supabase" : "共有保存: 一時ファイル";
     status.textContent = aiStatus.enabled
-      ? `AI回答: 有効 / ${aiStatus.model}`
-      : "AI回答: サーバー未設定";
+      ? `AI回答: 有効 / ${aiStatus.model} / ${storageLabel}`
+      : `AI回答: サーバー未設定 / ${storageLabel}`;
   } catch (error) {
     aiStatus = { enabled: false, model: "" };
     status.textContent = "AI回答: 状態確認に失敗";

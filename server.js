@@ -9,6 +9,9 @@ const dataFile = process.env.DATA_FILE || path.join(dataDir, "shared-data.json")
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
 const aiModel = process.env.OPENAI_MODEL || "gpt-5-mini";
+const supabaseUrl = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const supabaseTable = process.env.SUPABASE_TABLE || "home_care_shared_data";
 
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -64,6 +67,74 @@ function familyHash(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
+function sharedRecordFrom(data) {
+  return {
+    manuals: Array.isArray(data.manuals) ? data.manuals : [],
+    tasks: Array.isArray(data.tasks) ? data.tasks : [],
+    updatedAt: data.updatedAt || new Date().toISOString()
+  };
+}
+
+function hasSupabaseStore() {
+  return Boolean(supabaseUrl && supabaseServiceRoleKey);
+}
+
+async function supabaseRequest(pathname, options = {}) {
+  const response = await fetch(`${supabaseUrl}/rest/v1/${pathname}`, {
+    ...options,
+    headers: {
+      apikey: supabaseServiceRoleKey,
+      Authorization: `Bearer ${supabaseServiceRoleKey}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    }
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`Supabase error ${response.status}: ${message.slice(0, 180)}`);
+  }
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+async function readSharedData(key) {
+  if (!hasSupabaseStore()) {
+    return readStore()[key] || null;
+  }
+
+  const rows = await supabaseRequest(
+    `${encodeURIComponent(supabaseTable)}?family_hash=eq.${encodeURIComponent(key)}&select=data,updated_at&limit=1`
+  );
+  if (!Array.isArray(rows) || !rows.length) return null;
+  return {
+    ...sharedRecordFrom(rows[0].data || {}),
+    updatedAt: rows[0].updated_at || rows[0].data?.updatedAt || ""
+  };
+}
+
+async function writeSharedData(key, data) {
+  const record = sharedRecordFrom(data);
+  if (!hasSupabaseStore()) {
+    const store = readStore();
+    store[key] = record;
+    writeStore(store);
+    return record;
+  }
+
+  await supabaseRequest(encodeURIComponent(supabaseTable), {
+    method: "POST",
+    headers: {
+      Prefer: "resolution=merge-duplicates,return=minimal"
+    },
+    body: JSON.stringify({
+      family_hash: key,
+      data: record,
+      updated_at: record.updatedAt
+    })
+  });
+  return record;
+}
+
 async function handleApi(request, response, url) {
   if (request.method === "OPTIONS") {
     send(response, 204, "");
@@ -77,27 +148,22 @@ async function handleApi(request, response, url) {
   }
 
   const key = familyHash(family);
-  const store = readStore();
 
   if (request.method === "GET") {
-    if (!store[key]) {
+    const shared = await readSharedData(key);
+    if (!shared) {
       send(response, 404, "No shared data.");
       return;
     }
-    sendJson(response, 200, store[key]);
+    sendJson(response, 200, shared);
     return;
   }
 
   if (request.method === "PUT") {
     const body = await readBody(request);
     const data = JSON.parse(body || "{}");
-    store[key] = {
-      manuals: Array.isArray(data.manuals) ? data.manuals : [],
-      tasks: Array.isArray(data.tasks) ? data.tasks : [],
-      updatedAt: data.updatedAt || new Date().toISOString()
-    };
-    writeStore(store);
-    sendJson(response, 200, { ok: true, updatedAt: store[key].updatedAt });
+    const record = await writeSharedData(key, data);
+    sendJson(response, 200, { ok: true, updatedAt: record.updatedAt, storage: hasSupabaseStore() ? "supabase" : "file" });
     return;
   }
 
@@ -315,7 +381,8 @@ function handleStatus(response) {
   sendJson(response, 200, {
     ok: true,
     aiEnabled: Boolean(process.env.OPENAI_API_KEY),
-    aiModel
+    aiModel,
+    sharedStorage: hasSupabaseStore() ? "supabase" : "file"
   });
 }
 
