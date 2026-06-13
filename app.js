@@ -101,8 +101,10 @@ const ocrStatus = document.querySelector("#ocrStatus");
 const notificationStatus = document.querySelector("#notificationStatus");
 let sourcePreviewUrl = "";
 let sourcePreviewUrls = [];
-let sourcePhotoDataUrls = [];
+let sourcePhotoPayloads = [];
 let sourceFilePayloads = [];
+let pendingSources = [];
+let pendingSourceText = "";
 let aiStatus = { enabled: false, model: "" };
 let authStatus = { required: false, authenticated: true };
 let syncTimer = null;
@@ -135,7 +137,12 @@ sourceCamera.addEventListener("change", async () => {
     updateSourceReadiness();
     return;
   }
-  sourcePhotoDataUrls = await Promise.all(files.map(fileToDataUrl));
+  const dataUrls = await Promise.all(files.map(fileToDataUrl));
+  sourcePhotoPayloads = files.map((file, index) => ({
+    name: file.name || `photo-${index + 1}.jpg`,
+    type: file.type || "image/jpeg",
+    dataUrl: dataUrls[index]
+  }));
   sourcePreviewUrls = files.map((file) => URL.createObjectURL(file));
   renderSourcePreviews();
   updateSourceReadiness();
@@ -155,23 +162,34 @@ sourceFiles?.addEventListener("change", async () => {
 });
 
 readManualPhoto.addEventListener("click", async () => {
-  if (!sourcePhotoDataUrls.length && !sourceFilePayloads.length) return;
+  if (!sourcePhotoPayloads.length && !sourceFilePayloads.length) return;
   if (!aiStatus.enabled) {
     ocrStatus.textContent = "ソース読み取りにはRenderの環境変数 OPENAI_API_KEY の設定が必要です。";
     return;
   }
   readManualPhoto.disabled = true;
-  ocrStatus.textContent = `写真${sourcePhotoDataUrls.length}枚、ファイル${sourceFilePayloads.length}件を読み取っています。`;
+  ocrStatus.textContent = `写真${sourcePhotoPayloads.length}枚、ファイル${sourceFilePayloads.length}件を読み取っています。`;
   try {
     const response = await fetch("/api/ocr-manual", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageDataUrls: sourcePhotoDataUrls, sourceFiles: sourceFilePayloads })
+      body: JSON.stringify({
+        imageFiles: sourcePhotoPayloads,
+        sourceFiles: sourceFilePayloads,
+        familyCode: shareSettings.familyCode || ""
+      })
     });
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
     applyOcrResult(data);
-    ocrStatus.textContent = "AIが場所・分類・タグと内容を仮入力しました。違うところだけ直して保存してください。";
+    const savedLabel = data.storageSaved
+      ? `写真/PDF ${data.storageSaved}件をSupabaseに保存しました。`
+      : data.storageError
+        ? `原本保存に失敗しました。読み取り内容だけ保存できます。`
+      : sourcePhotoPayloads.length || sourceFilePayloads.some((file) => file.kind === "pdf")
+        ? "家族コードかSupabase設定がないため、原本保存はまだ行われていません。"
+        : "";
+    ocrStatus.textContent = `AIが場所・分類・タグと内容を仮入力しました。${savedLabel} 違うところだけ直して保存してください。`;
   } catch (error) {
     ocrStatus.textContent = `読み取りに失敗しました。${error.message ? ` ${error.message.slice(0, 80)}` : ""}`;
   } finally {
@@ -195,7 +213,9 @@ manualForm.addEventListener("submit", (event) => {
     tags: splitLinesOrComma(form.get("tags")),
     symptoms: splitLinesOrComma(form.get("symptoms")),
     steps: splitLinesOrComma(form.get("steps")),
-    content: form.get("content").trim()
+    content: form.get("content").trim(),
+    sourceText: pendingSourceTextFromForm(form.get("content")),
+    sources: pendingSources
   };
   const index = state.manuals.findIndex((item) => item.id === id);
   if (index >= 0) {
@@ -353,7 +373,9 @@ function normalizeState(rawState) {
       tags: Array.isArray(manual.tags) ? manual.tags : [],
       symptoms: Array.isArray(manual.symptoms) ? manual.symptoms : [],
       steps: Array.isArray(manual.steps) ? manual.steps : [],
-      content: manual.content || ""
+      content: manual.content || "",
+      sourceText: manual.sourceText || "",
+      sources: Array.isArray(manual.sources) ? manual.sources.map(normalizeSource) : []
     })),
     tasks: (rawState.tasks || []).map((task) => ({
       id: task.id || crypto.randomUUID(),
@@ -365,6 +387,18 @@ function normalizeState(rawState) {
       completed: Array.isArray(task.completed) ? task.completed : []
     })),
     updatedAt: rawState.updatedAt || ""
+  };
+}
+
+function normalizeSource(source) {
+  return {
+    id: source.id || crypto.randomUUID(),
+    type: source.type || "file",
+    name: source.name || "ソース",
+    storagePath: source.storagePath || "",
+    mimeType: source.mimeType || "",
+    bucket: source.bucket || "",
+    createdAt: source.createdAt || ""
   };
 }
 
@@ -565,6 +599,8 @@ async function generateAiAnswer(query, manuals) {
 解決手順:
 ${(manual.steps || []).map((step, stepIndex) => `${stepIndex + 1}. ${step}`).join("\n")}
 メモ: ${manual.content || "なし"}
+ソース本文:
+${manual.sourceText || manual.content || "なし"}
   `.trim()).join("\n\n");
 
   const response = await fetch("/api/ai-answer", {
@@ -661,6 +697,7 @@ function rankManuals(query) {
         manual.room,
         manual.category,
         manual.content,
+        manual.sourceText,
         ...manual.tags,
         ...manual.symptoms,
         ...manual.steps
@@ -703,6 +740,7 @@ function renderManuals() {
       </div>
       <p class="meta-line">症状: ${manual.symptoms.map(escapeHtml).join("、")}</p>
       <p class="meta-line">手順: ${manual.steps.slice(0, 2).map(escapeHtml).join(" / ")}${manual.steps.length > 2 ? " ..." : ""}</p>
+      ${manual.sources.length ? `<p class="meta-line">保存済み原本: ${manual.sources.length}件</p>` : ""}
       <div class="tag-row">${manual.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
     `;
     list.append(card);
@@ -892,6 +930,8 @@ function editManual(id) {
   manualForm.elements.symptoms.value = manual.symptoms.join("\n");
   manualForm.elements.steps.value = manual.steps.join("\n");
   manualForm.elements.content.value = manual.content;
+  pendingSources = manual.sources || [];
+  pendingSourceText = manual.sourceText || "";
   document.querySelector("#manualSubmitButton").textContent = "取説を更新";
   document.querySelector("#cancelManualEdit").hidden = false;
   switchView("manuals");
@@ -901,6 +941,8 @@ function editManual(id) {
 function resetManualForm() {
   manualForm.reset();
   manualForm.elements.id.value = "";
+  pendingSources = [];
+  pendingSourceText = "";
   document.querySelector("#manualSubmitButton").textContent = "取説を保存";
   document.querySelector("#cancelManualEdit").hidden = true;
   resetSourcePreview();
@@ -996,7 +1038,7 @@ function clearPhotoPreviews(clearInput = true) {
   sourcePreviewUrls.forEach((url) => URL.revokeObjectURL(url));
   sourcePreviewUrl = "";
   sourcePreviewUrls = [];
-  sourcePhotoDataUrls = [];
+  sourcePhotoPayloads = [];
   sourcePreview.removeAttribute("src");
   sourcePreview.hidden = true;
   sourcePreviewList.innerHTML = "";
@@ -1026,7 +1068,7 @@ function renderSourceFiles() {
 }
 
 function updateSourceReadiness(resetMessage = false) {
-  const total = sourcePhotoDataUrls.length + sourceFilePayloads.length;
+  const total = sourcePhotoPayloads.length + sourceFilePayloads.length;
   readManualPhoto.disabled = total === 0;
   clearManualPhoto.disabled = total === 0;
   if (resetMessage) {
@@ -1034,7 +1076,7 @@ function updateSourceReadiness(resetMessage = false) {
     return;
   }
   if (total > 0) {
-    ocrStatus.textContent = `写真${sourcePhotoDataUrls.length}枚、ファイル${sourceFilePayloads.length}件を確認しました。まとめて読み取れます。`;
+    ocrStatus.textContent = `写真${sourcePhotoPayloads.length}枚、ファイル${sourceFilePayloads.length}件を確認しました。まとめて読み取れます。`;
   }
 }
 
@@ -1083,6 +1125,12 @@ function applyOcrResult(data) {
   if (Array.isArray(data.tags)) fields.tags.value = mergeTextList(fields.tags.value, data.tags, "、");
   if (Array.isArray(data.symptoms)) fields.symptoms.value = mergeTextList(fields.symptoms.value, data.symptoms, "\n");
   if (Array.isArray(data.steps)) fields.steps.value = mergeTextList(fields.steps.value, data.steps, "\n");
+  if (Array.isArray(data.storedSources) && data.storedSources.length) {
+    pendingSources = mergeSources(pendingSources, data.storedSources);
+  }
+  if (data.sourceText) {
+    pendingSourceText = [pendingSourceText.trim(), String(data.sourceText).trim()].filter(Boolean).join("\n\n");
+  }
   const memoParts = [
     data.modelNumber ? `品番: ${data.modelNumber}` : "",
     data.content || "",
@@ -1092,6 +1140,25 @@ function applyOcrResult(data) {
   if (memoParts.length) {
     fields.content.value = [fields.content.value.trim(), memoParts.join("\n")].filter(Boolean).join("\n\n");
   }
+}
+
+function pendingSourceTextFromForm(content) {
+  const existing = manualForm.elements.id.value
+    ? state.manuals.find((manual) => manual.id === manualForm.elements.id.value)?.sourceText || ""
+    : "";
+  return [existing.trim(), pendingSourceText.trim(), String(content || "").trim()]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join("\n\n");
+}
+
+function mergeSources(existing, additions) {
+  const byPath = new Map((existing || []).map((source) => [source.storagePath || source.id, normalizeSource(source)]));
+  additions.forEach((source) => {
+    const normalized = normalizeSource(source);
+    byPath.set(normalized.storagePath || normalized.id, normalized);
+  });
+  return [...byPath.values()];
 }
 
 function mergeTextList(current, additions, separator) {

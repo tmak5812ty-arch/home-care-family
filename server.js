@@ -12,6 +12,7 @@ const aiModel = process.env.OPENAI_MODEL || "gpt-5-mini";
 const supabaseUrl = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const supabaseTable = process.env.SUPABASE_TABLE || "home_care_shared_data";
+const supabaseBucket = process.env.SUPABASE_BUCKET || "home-care-sources";
 const appPassword = process.env.APP_PASSWORD || "";
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 
@@ -144,16 +145,22 @@ function hasSupabaseStore() {
   return Boolean(supabaseUrl && supabaseServiceRoleKey);
 }
 
-async function supabaseRequest(pathname, options = {}) {
+function supabaseHeaders(contentType = "application/json") {
   const authHeaders = supabaseServiceRoleKey.startsWith("sb_secret_")
     ? {}
     : { Authorization: `Bearer ${supabaseServiceRoleKey}` };
+  return {
+    apikey: supabaseServiceRoleKey,
+    ...authHeaders,
+    ...(contentType ? { "Content-Type": contentType } : {})
+  };
+}
+
+async function supabaseRequest(pathname, options = {}) {
   const response = await fetch(`${supabaseUrl}/rest/v1/${pathname}`, {
     ...options,
     headers: {
-      apikey: supabaseServiceRoleKey,
-      ...authHeaders,
-      "Content-Type": "application/json",
+      ...supabaseHeaders(),
       ...(options.headers || {})
     }
   });
@@ -304,10 +311,11 @@ function ocrResponseSchema() {
       symptoms: { type: "array", items: { type: "string" }, description: "よくある症状やエラー。" },
       steps: { type: "array", items: { type: "string" }, description: "取説に書かれた操作や確認手順。" },
       content: { type: "string", description: "保存しておくべき要点のメモ。" },
+      sourceText: { type: "string", description: "写真やPDFから読めた文字、表、警告、手順をできるだけ原文に近くまとめた本文。" },
       contact: { type: "string", description: "問い合わせ先。読み取れなければ空文字。" },
       cautions: { type: "string", description: "安全上の注意。読み取れなければ空文字。" }
     },
-    required: ["title", "room", "category", "modelNumber", "tags", "symptoms", "steps", "content", "contact", "cautions"]
+    required: ["title", "room", "category", "modelNumber", "tags", "symptoms", "steps", "content", "sourceText", "contact", "cautions"]
   };
 }
 
@@ -348,6 +356,75 @@ function sourceFileParts(files) {
     }
     return [];
   });
+}
+
+function parseDataUrl(dataUrl) {
+  const match = String(dataUrl).match(/^data:([^;,]+);base64,(.+)$/);
+  if (!match) return null;
+  return {
+    mimeType: match[1],
+    buffer: Buffer.from(match[2], "base64")
+  };
+}
+
+async function ensureStorageBucket() {
+  if (!hasSupabaseStore()) return false;
+  const response = await fetch(`${supabaseUrl}/storage/v1/bucket`, {
+    method: "POST",
+    headers: supabaseHeaders(),
+    body: JSON.stringify({ id: supabaseBucket, name: supabaseBucket, public: false })
+  });
+  if (response.ok || response.status === 409 || response.status === 400) return true;
+  throw new Error(`Supabase storage bucket error ${response.status}: ${(await response.text()).slice(0, 160)}`);
+}
+
+async function uploadSourceFiles(family, imageFiles, files) {
+  if (!family || !hasSupabaseStore()) return [];
+  await ensureStorageBucket();
+  const familyKey = familyHash(family);
+  const items = [
+    ...imageFiles.map((file, index) => ({
+      kind: "image",
+      name: safeSourceFileName(file.name || `photo-${index + 1}.jpg`),
+      dataUrl: file.dataUrl,
+      fallbackMime: file.type || "image/jpeg"
+    })),
+    ...files.filter((file) => String(file.kind || "") === "pdf").map((file, index) => ({
+      kind: "pdf",
+      name: safeSourceFileName(file.name || `source-${index + 1}.pdf`),
+      dataUrl: file.dataUrl,
+      fallbackMime: "application/pdf"
+    }))
+  ];
+
+  const uploaded = [];
+  for (const item of items) {
+    const parsed = parseDataUrl(item.dataUrl);
+    if (!parsed) continue;
+    const extension = path.extname(item.name) || (parsed.mimeType === "application/pdf" ? ".pdf" : ".jpg");
+    const objectPath = `${familyKey}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}${extension}`;
+    const response = await fetch(`${supabaseUrl}/storage/v1/object/${supabaseBucket}/${objectPath}`, {
+      method: "POST",
+      headers: {
+        ...supabaseHeaders(parsed.mimeType || item.fallbackMime),
+        "x-upsert": "true"
+      },
+      body: parsed.buffer
+    });
+    if (!response.ok) {
+      throw new Error(`Supabase storage upload error ${response.status}: ${(await response.text()).slice(0, 160)}`);
+    }
+    uploaded.push({
+      id: crypto.randomUUID(),
+      type: item.kind,
+      name: item.name,
+      storagePath: objectPath,
+      mimeType: parsed.mimeType || item.fallbackMime,
+      bucket: supabaseBucket,
+      createdAt: new Date().toISOString()
+    });
+  }
+  return uploaded;
 }
 
 async function handleAiAnswer(request, response) {
@@ -431,7 +508,16 @@ async function handleOcrManual(request, response) {
   }
 
   const body = JSON.parse(await readBody(request) || "{}");
-  const imageDataUrls = Array.isArray(body.imageDataUrls)
+  const imageFiles = Array.isArray(body.imageFiles)
+    ? body.imageFiles.map((file, index) => ({
+      name: safeSourceFileName(file.name || `photo-${index + 1}.jpg`),
+      type: String(file.type || "image/jpeg"),
+      dataUrl: String(file.dataUrl || "")
+    })).filter((file) => file.dataUrl.startsWith("data:image/")).slice(0, 12)
+    : [];
+  const imageDataUrls = imageFiles.length
+    ? imageFiles.map((file) => file.dataUrl)
+    : Array.isArray(body.imageDataUrls)
     ? body.imageDataUrls.map(String).filter((value) => value.startsWith("data:image/")).slice(0, 12)
     : [String(body.imageDataUrl || "")].filter((value) => value.startsWith("data:image/"));
   const files = Array.isArray(body.sourceFiles) ? body.sourceFiles.slice(0, 8) : [];
@@ -486,7 +572,21 @@ async function handleOcrManual(request, response) {
     return;
   }
 
-  sendJson(response, 200, parseOpenAiPayload(await aiResponse.json()));
+  const payload = parseOpenAiPayload(await aiResponse.json());
+  let storedSources = [];
+  let storageError = "";
+  try {
+    storedSources = await uploadSourceFiles(String(body.familyCode || ""), imageFiles, files);
+  } catch (error) {
+    storageError = error.message || "Storage upload failed.";
+  }
+  sendJson(response, 200, {
+    ...payload,
+    storedSources,
+    storageEnabled: hasSupabaseStore(),
+    storageSaved: storedSources.length,
+    storageError
+  });
 }
 
 function handleStatus(response) {
@@ -495,6 +595,8 @@ function handleStatus(response) {
     aiEnabled: Boolean(process.env.OPENAI_API_KEY),
     aiModel,
     sharedStorage: hasSupabaseStore() ? "supabase" : "file",
+    sourceStorage: hasSupabaseStore() ? "supabase-storage" : "none",
+    sourceBucket: supabaseBucket,
     authRequired: Boolean(appPassword)
   });
 }

@@ -10,6 +10,7 @@
 - `SUPABASE_URL`: Supabaseへ家族共有データを保存する場合
 - `SUPABASE_SERVICE_ROLE_KEY`: Supabaseへ家族共有データを保存する場合。ブラウザには出さず、サーバー環境変数にだけ設定します。
 - `SUPABASE_TABLE=home_care_shared_data`
+- `SUPABASE_BUCKET=home-care-sources`: 写真やPDFの原本を保存するSupabase Storageバケット名
 - `APP_PASSWORD`: アプリを開くための共有パスワード。家族だけに共有してください。
 - `SESSION_SECRET`: ログインセッション署名用。Renderでは自動生成できます。
 - `DATA_DIR`: ファイル保存を使う場合の永続保存ディスクのパス
@@ -29,6 +30,8 @@ alter table public.home_care_shared_data enable row level security;
 ```
 
 Renderの環境変数に `SUPABASE_URL` と `SUPABASE_SERVICE_ROLE_KEY` を設定すると、無料Renderでも家族共有データをSupabaseに永続保存できます。未設定の場合は従来通りファイル保存に戻ります。
+
+写真やPDFの原本保存にはSupabase Storageを使います。`SUPABASE_BUCKET` は未設定でも `home-care-sources` が使われ、アプリがバケットを自動作成します。
 
 ## Render
 
