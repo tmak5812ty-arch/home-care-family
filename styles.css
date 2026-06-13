@@ -709,7 +709,7 @@ select:focus {
 
 .source-action-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -724,6 +724,10 @@ select:focus {
 .camera-button {
   background: #526f73;
   color: #ffffff;
+}
+
+.secondary-camera-button {
+  background: #6f8178;
 }
 
 .file-button {
@@ -972,6 +976,15 @@ select:focus {
   inline-size: 1px;
   block-size: 1px;
   opacity: 0;
+}
+
+.visually-hidden-file {
+  position: fixed;
+  inline-size: 1px;
+  block-size: 1px;
+  inset-inline-start: -100vw;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .empty-state {

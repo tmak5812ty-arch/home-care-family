@@ -92,12 +92,16 @@ const views = document.querySelectorAll(".view");
 const navItems = document.querySelectorAll(".nav-item");
 const emptyTemplate = document.querySelector("#emptyTemplate");
 const sourceCamera = document.querySelector("#sourceCamera");
+const sourcePhotoLibrary = document.querySelector("#sourcePhotoLibrary");
 const sourceFiles = document.querySelector("#sourceFiles");
 const sourcePreview = document.querySelector("#sourcePreview");
 const sourcePreviewList = document.querySelector("#sourcePreviewList");
 const sourceFileList = document.querySelector("#sourceFileList");
 const manualForm = document.querySelector("#manualForm");
 const taskForm = document.querySelector("#taskForm");
+const takeManualPhoto = document.querySelector("#takeManualPhoto");
+const chooseManualPhotos = document.querySelector("#chooseManualPhotos");
+const chooseSourceFiles = document.querySelector("#chooseSourceFiles");
 const readManualPhoto = document.querySelector("#readManualPhoto");
 const clearManualPhoto = document.querySelector("#clearManualPhoto");
 const ocrStatus = document.querySelector("#ocrStatus");
@@ -134,23 +138,50 @@ document.querySelector("#searchForm").addEventListener("submit", async (event) =
   await renderResults(query);
 });
 
+takeManualPhoto?.addEventListener("click", () => {
+  sourceCamera?.click();
+});
+
+chooseManualPhotos?.addEventListener("click", () => {
+  sourcePhotoLibrary?.click();
+});
+
+chooseSourceFiles?.addEventListener("click", () => {
+  sourceFiles?.click();
+});
+
 sourceCamera.addEventListener("change", async () => {
-  clearPhotoPreviews(false);
-  const files = [...sourceCamera.files].slice(0, 12);
+  const files = [...sourceCamera.files].slice(0, Math.max(0, 12 - sourcePhotoPayloads.length));
   if (!files.length) {
     updateSourceReadiness();
     return;
   }
+  await addPhotoFiles(files);
+  if (sourceCamera) sourceCamera.value = "";
+});
+
+sourcePhotoLibrary?.addEventListener("change", async () => {
+  const files = [...sourcePhotoLibrary.files].slice(0, Math.max(0, 12 - sourcePhotoPayloads.length));
+  if (!files.length) {
+    updateSourceReadiness();
+    return;
+  }
+  await addPhotoFiles(files);
+  if (sourcePhotoLibrary) sourcePhotoLibrary.value = "";
+});
+
+async function addPhotoFiles(files) {
   const dataUrls = await Promise.all(files.map(fileToDataUrl));
-  sourcePhotoPayloads = files.map((file, index) => ({
-    name: file.name || `photo-${index + 1}.jpg`,
+  const startIndex = sourcePhotoPayloads.length;
+  sourcePhotoPayloads.push(...files.map((file, index) => ({
+    name: file.name || `photo-${startIndex + index + 1}.jpg`,
     type: file.type || "image/jpeg",
     dataUrl: dataUrls[index]
-  }));
-  sourcePreviewUrls = files.map((file) => URL.createObjectURL(file));
+  })));
+  sourcePreviewUrls.push(...files.map((file) => URL.createObjectURL(file)));
   renderSourcePreviews();
   updateSourceReadiness();
-});
+}
 
 sourceFiles?.addEventListener("change", async () => {
   sourceFilePayloads = [];
@@ -1144,6 +1175,7 @@ function clearPhotoPreviews(clearInput = true) {
   sourcePreview.hidden = true;
   sourcePreviewList.innerHTML = "";
   if (clearInput && sourceCamera) sourceCamera.value = "";
+  if (clearInput && sourcePhotoLibrary) sourcePhotoLibrary.value = "";
 }
 
 function renderSourcePreviews() {

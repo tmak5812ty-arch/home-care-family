@@ -178,14 +178,12 @@
                 <div class="camera-source">
                   <span class="field-label">ソース読み取り</span>
                   <div class="source-action-panel">
-                    <label class="file-picker camera-button">
-                      <input id="sourceCamera" name="sourcePhoto" type="file" accept="image/*" capture="environment" multiple>
-                      紙の取説をまとめて撮影・選択
-                    </label>
-                    <label class="file-picker file-button">
-                      <input id="sourceFiles" name="sourceFiles" type="file" accept=".pdf,.txt,.csv,.json,.md,application/pdf,text/plain,text/csv,application/json,text/markdown" multiple>
-                      PDF・メモ・データを選択
-                    </label>
+                    <input id="sourceCamera" class="visually-hidden-file" name="sourcePhoto" type="file" accept="image/*" capture="environment">
+                    <input id="sourcePhotoLibrary" class="visually-hidden-file" name="sourcePhotoLibrary" type="file" accept="image/*" multiple>
+                    <input id="sourceFiles" class="visually-hidden-file" name="sourceFiles" type="file" accept=".pdf,.txt,.csv,.json,.md,application/pdf,text/plain,text/csv,application/json,text/markdown" multiple>
+                    <button id="takeManualPhoto" class="file-picker camera-button" type="button">カメラで1ページ撮る</button>
+                    <button id="chooseManualPhotos" class="file-picker camera-button secondary-camera-button" type="button">撮影済み写真をまとめて選ぶ</button>
+                    <button id="chooseSourceFiles" class="file-picker file-button" type="button">PDF・メモ・データを選択</button>
                   </div>
                   <div id="sourcePreviewList" class="source-preview-list"></div>
                   <div id="sourceFileList" class="source-file-list"></div>
