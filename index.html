@@ -154,12 +154,20 @@
             <section class="panel form-panel">
               <div class="panel-heading">
                 <div>
-                  <p class="eyebrow">ADD MANUAL</p>
-                  <h2>取説データを追加</h2>
+                  <p class="eyebrow">ADD SOURCE</p>
+                  <h2>ソースを追加</h2>
                 </div>
               </div>
               <form id="manualForm" class="data-form">
                 <input name="id" type="hidden">
+                <div class="source-guide" aria-label="ソース追加の流れ">
+                  <strong>追加の流れ</strong>
+                  <ol>
+                    <li>紙の取説はまとめて撮影、PDFやメモはファイルで選択します。</li>
+                    <li>「ソースを読み取る」を押すと、場所・分類・タグをAIが仮入力します。</li>
+                    <li>内容を確認して、違うところだけ直して保存します。</li>
+                  </ol>
+                </div>
                 <label>設備名<input name="title" required placeholder="例: 浴室乾燥機"></label>
                 <label>場所<input name="room" required placeholder="例: 浴室"></label>
                 <label>分類<input name="category" required placeholder="例: 空調・水回り"></label>
@@ -167,18 +175,25 @@
                 <label>よくある症状<textarea name="symptoms" required placeholder="1行に1つずつ入力"></textarea></label>
                 <label>解決手順<textarea name="steps" required placeholder="1行に1手順ずつ入力"></textarea></label>
                 <div class="camera-source">
-                  <span class="field-label">紙の取説をまとめて撮る</span>
-                  <label class="file-picker camera-button">
-                    <input id="sourceCamera" name="sourcePhoto" type="file" accept="image/*" capture="environment" multiple>
-                    写真を撮影・選択
-                  </label>
+                  <span class="field-label">ソース読み取り</span>
+                  <div class="source-action-panel">
+                    <label class="file-picker camera-button">
+                      <input id="sourceCamera" name="sourcePhoto" type="file" accept="image/*" capture="environment" multiple>
+                      紙の取説をまとめて撮影・選択
+                    </label>
+                    <label class="file-picker file-button">
+                      <input id="sourceFiles" name="sourceFiles" type="file" accept=".pdf,.txt,.csv,.json,.md,application/pdf,text/plain,text/csv,application/json,text/markdown" multiple>
+                      PDF・メモ・データを選択
+                    </label>
+                  </div>
                   <div id="sourcePreviewList" class="source-preview-list"></div>
+                  <div id="sourceFileList" class="source-file-list"></div>
                   <img id="sourcePreview" class="source-preview" alt="撮影した取説の一時プレビュー" hidden>
                   <div class="task-actions">
-                    <button id="readManualPhoto" class="small-button" type="button" disabled>まとめて読み取る</button>
-                    <button id="clearManualPhoto" class="small-button" type="button" disabled>写真を消す</button>
+                    <button id="readManualPhoto" class="small-button" type="button" disabled>ソースを読み取る</button>
+                    <button id="clearManualPhoto" class="small-button" type="button" disabled>選択を消す</button>
                   </div>
-                  <p class="muted" id="ocrStatus">複数ページを選べます。写真は保存せず、読み取った要点だけフォームへ転記します。</p>
+                  <p class="muted" id="ocrStatus">写真・PDF・テキストを選べます。元ファイルは保存せず、読み取った要点だけフォームへ転記します。</p>
                 </div>
                 <label>取説メモ・転記内容<textarea name="content" placeholder="品番、注意点、エラー番号、問い合わせ先など"></textarea></label>
                 <div class="task-actions">

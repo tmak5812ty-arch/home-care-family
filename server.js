@@ -28,7 +28,7 @@ function readBody(request) {
     let body = "";
     request.on("data", (chunk) => {
       body += chunk;
-      if (body.length > 30_000_000) {
+      if (body.length > 55_000_000) {
         reject(new Error("Request too large"));
       }
     });
@@ -321,6 +321,35 @@ function parseOpenAiPayload(data) {
   return JSON.parse(text);
 }
 
+function safeSourceFileName(value) {
+  return String(value || "source")
+    .replace(/[^\w.\-ぁ-んァ-ン一-龠々ー ]/g, "_")
+    .slice(0, 120);
+}
+
+function sourceFileParts(files) {
+  return files.flatMap((file) => {
+    const kind = String(file.kind || "");
+    const name = safeSourceFileName(file.name);
+    const text = String(file.text || "").trim();
+    const dataUrl = String(file.dataUrl || "");
+    if (kind === "pdf" && dataUrl.startsWith("data:application/pdf")) {
+      return [{
+        type: "input_file",
+        filename: name.endsWith(".pdf") ? name : `${name}.pdf`,
+        file_data: dataUrl
+      }];
+    }
+    if (text) {
+      return [{
+        type: "input_text",
+        text: `\n\n--- 添付データ: ${name} ---\n${text.slice(0, 45_000)}`
+      }];
+    }
+    return [];
+  });
+}
+
 async function handleAiAnswer(request, response) {
   if (request.method === "OPTIONS") {
     send(response, 204, "");
@@ -405,8 +434,10 @@ async function handleOcrManual(request, response) {
   const imageDataUrls = Array.isArray(body.imageDataUrls)
     ? body.imageDataUrls.map(String).filter((value) => value.startsWith("data:image/")).slice(0, 12)
     : [String(body.imageDataUrl || "")].filter((value) => value.startsWith("data:image/"));
-  if (!imageDataUrls.length) {
-    send(response, 400, "Image data URLs are required.");
+  const files = Array.isArray(body.sourceFiles) ? body.sourceFiles.slice(0, 8) : [];
+  const fileParts = sourceFileParts(files);
+  if (!imageDataUrls.length && !fileParts.length) {
+    send(response, 400, "Source photos or files are required.");
     return;
   }
 
@@ -419,8 +450,9 @@ async function handleOcrManual(request, response) {
     body: JSON.stringify({
       model: aiModel,
       instructions: [
-        "あなたは家庭設備の取扱説明書、ラベル、保証書の写真から、家の管理アプリに保存する情報を抽出するアシスタントです。",
-        "写真に読める内容だけを使い、読めない項目は空文字または空配列にしてください。",
+        "あなたは家庭設備の取扱説明書、ラベル、保証書、PDF、メモ、CSV/JSONデータから、家の管理アプリに保存する情報を抽出するアシスタントです。",
+        "添付ソースに読める内容だけを使い、読めない項目は空文字または空配列にしてください。",
+        "場所、分類、タグはソースから判断できる範囲で自動分類してください。判断材料が弱い場合は一般的すぎる分類にしてください。",
         "複数ページがある場合は、ページ間の重複を整理し、品番、エラー番号、警告、手順を取りこぼさないでください。",
         "読みにくい文字は推測せず、contentに「判読不明」と明記してください。",
         "ユーザーが後から検索しやすいよう、症状、エラー番号、掃除、交換、点検、問い合わせ先を優先して抜き出してください。",
@@ -431,8 +463,9 @@ async function handleOcrManual(request, response) {
         {
           role: "user",
           content: [
-            { type: "input_text", text: `${imageDataUrls.length}枚の写真から家の管理アプリに保存する取説データを抽出してください。` },
-            ...imageDataUrls.map((image_url) => ({ type: "input_image", image_url }))
+            { type: "input_text", text: `写真${imageDataUrls.length}枚、ファイル${fileParts.length}件から家の管理アプリに保存するソースデータを抽出してください。` },
+            ...imageDataUrls.map((image_url) => ({ type: "input_image", image_url })),
+            ...fileParts
           ]
         }
       ],

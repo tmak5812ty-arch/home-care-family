@@ -89,8 +89,10 @@ const views = document.querySelectorAll(".view");
 const navItems = document.querySelectorAll(".nav-item");
 const emptyTemplate = document.querySelector("#emptyTemplate");
 const sourceCamera = document.querySelector("#sourceCamera");
+const sourceFiles = document.querySelector("#sourceFiles");
 const sourcePreview = document.querySelector("#sourcePreview");
 const sourcePreviewList = document.querySelector("#sourcePreviewList");
+const sourceFileList = document.querySelector("#sourceFileList");
 const manualForm = document.querySelector("#manualForm");
 const taskForm = document.querySelector("#taskForm");
 const readManualPhoto = document.querySelector("#readManualPhoto");
@@ -100,6 +102,7 @@ const notificationStatus = document.querySelector("#notificationStatus");
 let sourcePreviewUrl = "";
 let sourcePreviewUrls = [];
 let sourcePhotoDataUrls = [];
+let sourceFilePayloads = [];
 let aiStatus = { enabled: false, model: "" };
 let authStatus = { required: false, authenticated: true };
 let syncTimer = null;
@@ -126,35 +129,49 @@ document.querySelector("#searchForm").addEventListener("submit", async (event) =
 });
 
 sourceCamera.addEventListener("change", async () => {
-  resetSourcePreview();
+  clearPhotoPreviews(false);
   const files = [...sourceCamera.files].slice(0, 12);
-  if (!files.length) return;
+  if (!files.length) {
+    updateSourceReadiness();
+    return;
+  }
   sourcePhotoDataUrls = await Promise.all(files.map(fileToDataUrl));
   sourcePreviewUrls = files.map((file) => URL.createObjectURL(file));
   renderSourcePreviews();
-  readManualPhoto.disabled = false;
-  clearManualPhoto.disabled = false;
-  ocrStatus.textContent = `${files.length}枚の写真を確認しました。まとめて読み取れます。`;
+  updateSourceReadiness();
+});
+
+sourceFiles?.addEventListener("change", async () => {
+  sourceFilePayloads = [];
+  const files = [...sourceFiles.files].slice(0, 8);
+  if (!files.length) {
+    renderSourceFiles();
+    updateSourceReadiness();
+    return;
+  }
+  sourceFilePayloads = await Promise.all(files.map(fileToSourcePayload));
+  renderSourceFiles();
+  updateSourceReadiness();
 });
 
 readManualPhoto.addEventListener("click", async () => {
-  if (!sourcePhotoDataUrls.length) return;
+  if (!sourcePhotoDataUrls.length && !sourceFilePayloads.length) return;
   if (!aiStatus.enabled) {
-    ocrStatus.textContent = "写真読み取りにはRenderの環境変数 OPENAI_API_KEY の設定が必要です。";
+    ocrStatus.textContent = "ソース読み取りにはRenderの環境変数 OPENAI_API_KEY の設定が必要です。";
     return;
   }
   readManualPhoto.disabled = true;
-  ocrStatus.textContent = `${sourcePhotoDataUrls.length}枚の写真を読み取っています。`;
+  ocrStatus.textContent = `写真${sourcePhotoDataUrls.length}枚、ファイル${sourceFilePayloads.length}件を読み取っています。`;
   try {
     const response = await fetch("/api/ocr-manual", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageDataUrls: sourcePhotoDataUrls })
+      body: JSON.stringify({ imageDataUrls: sourcePhotoDataUrls, sourceFiles: sourceFilePayloads })
     });
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
     applyOcrResult(data);
-    ocrStatus.textContent = "読み取った内容をフォームへ反映しました。必要に応じて直してください。";
+    ocrStatus.textContent = "AIが場所・分類・タグと内容を仮入力しました。違うところだけ直して保存してください。";
   } catch (error) {
     ocrStatus.textContent = `読み取りに失敗しました。${error.message ? ` ${error.message.slice(0, 80)}` : ""}`;
   } finally {
@@ -965,6 +982,14 @@ function splitLinesOrComma(value) {
 }
 
 function resetSourcePreview() {
+  clearPhotoPreviews();
+  sourceFilePayloads = [];
+  if (sourceFiles) sourceFiles.value = "";
+  renderSourceFiles();
+  updateSourceReadiness(true);
+}
+
+function clearPhotoPreviews(clearInput = true) {
   if (sourcePreviewUrl) {
     URL.revokeObjectURL(sourcePreviewUrl);
   }
@@ -975,10 +1000,7 @@ function resetSourcePreview() {
   sourcePreview.removeAttribute("src");
   sourcePreview.hidden = true;
   sourcePreviewList.innerHTML = "";
-  if (sourceCamera) sourceCamera.value = "";
-  readManualPhoto.disabled = true;
-  clearManualPhoto.disabled = true;
-  ocrStatus.textContent = "複数ページを選べます。写真は保存せず、読み取った要点だけフォームへ転記します。";
+  if (clearInput && sourceCamera) sourceCamera.value = "";
 }
 
 function renderSourcePreviews() {
@@ -991,6 +1013,31 @@ function renderSourcePreviews() {
   });
 }
 
+function renderSourceFiles() {
+  if (!sourceFileList) return;
+  sourceFileList.innerHTML = "";
+  sourceFilePayloads.forEach((file, index) => {
+    const item = document.createElement("div");
+    item.className = "source-file-item";
+    const kind = file.kind === "pdf" ? "PDF" : "DATA";
+    item.innerHTML = `<strong>${kind}</strong><span>${escapeHtml(file.name || `ファイル ${index + 1}`)}</span>`;
+    sourceFileList.append(item);
+  });
+}
+
+function updateSourceReadiness(resetMessage = false) {
+  const total = sourcePhotoDataUrls.length + sourceFilePayloads.length;
+  readManualPhoto.disabled = total === 0;
+  clearManualPhoto.disabled = total === 0;
+  if (resetMessage) {
+    ocrStatus.textContent = "写真・PDF・テキストを選べます。元ファイルは保存せず、読み取った要点だけフォームへ転記します。";
+    return;
+  }
+  if (total > 0) {
+    ocrStatus.textContent = `写真${sourcePhotoDataUrls.length}枚、ファイル${sourceFilePayloads.length}件を確認しました。まとめて読み取れます。`;
+  }
+}
+
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1000,14 +1047,42 @@ function fileToDataUrl(file) {
   });
 }
 
+function fileToText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")));
+    reader.addEventListener("error", reject);
+    reader.readAsText(file);
+  });
+}
+
+async function fileToSourcePayload(file) {
+  const name = file.name || "source";
+  const isPdf = file.type === "application/pdf" || name.toLowerCase().endsWith(".pdf");
+  if (isPdf) {
+    return {
+      kind: "pdf",
+      name,
+      type: file.type || "application/pdf",
+      dataUrl: await fileToDataUrl(file)
+    };
+  }
+  return {
+    kind: "text",
+    name,
+    type: file.type || "text/plain",
+    text: await fileToText(file)
+  };
+}
+
 function applyOcrResult(data) {
   const fields = manualForm.elements;
   if (data.title && !fields.title.value.trim()) fields.title.value = data.title;
   if (data.room && !fields.room.value.trim()) fields.room.value = data.room;
   if (data.category && !fields.category.value.trim()) fields.category.value = data.category;
-  if (Array.isArray(data.tags) && !fields.tags.value.trim()) fields.tags.value = data.tags.join("、");
-  if (Array.isArray(data.symptoms) && !fields.symptoms.value.trim()) fields.symptoms.value = data.symptoms.join("\n");
-  if (Array.isArray(data.steps) && !fields.steps.value.trim()) fields.steps.value = data.steps.join("\n");
+  if (Array.isArray(data.tags)) fields.tags.value = mergeTextList(fields.tags.value, data.tags, "、");
+  if (Array.isArray(data.symptoms)) fields.symptoms.value = mergeTextList(fields.symptoms.value, data.symptoms, "\n");
+  if (Array.isArray(data.steps)) fields.steps.value = mergeTextList(fields.steps.value, data.steps, "\n");
   const memoParts = [
     data.modelNumber ? `品番: ${data.modelNumber}` : "",
     data.content || "",
@@ -1017,6 +1092,15 @@ function applyOcrResult(data) {
   if (memoParts.length) {
     fields.content.value = [fields.content.value.trim(), memoParts.join("\n")].filter(Boolean).join("\n\n");
   }
+}
+
+function mergeTextList(current, additions, separator) {
+  const existing = splitLinesOrComma(current);
+  const merged = [...existing];
+  additions.map(String).map((item) => item.trim()).filter(Boolean).forEach((item) => {
+    if (!merged.includes(item)) merged.push(item);
+  });
+  return merged.join(separator);
 }
 
 async function initializeAuth() {
