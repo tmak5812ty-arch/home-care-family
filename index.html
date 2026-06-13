@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#172033">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="家の管理">
+    <title>家の管理</title>
+    <link rel="manifest" href="./manifest.json">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="rail" aria-label="メインナビゲーション">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">家</span>
+          <div>
+            <strong>家の管理</strong>
+            <span>取説・メンテ・掃除</span>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="画面切り替え">
+          <button class="nav-item active" data-view="dashboard" type="button">ダッシュボード</button>
+          <button class="nav-item" data-view="manuals" type="button">取説データ</button>
+          <button class="nav-item" data-view="calendar" type="button">カレンダー</button>
+          <button class="nav-item" data-view="settings" type="button">データ管理</button>
+        </nav>
+
+        <section class="rail-summary" aria-label="今週の概要">
+          <span>今週の予定</span>
+          <strong id="weekCount">0件</strong>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">HOME CARE LIBRARY</p>
+            <h1>困った時に、家の答えをすぐ出す</h1>
+          </div>
+          <div class="date-chip" id="todayLabel"></div>
+        </header>
+
+        <section class="view active" id="dashboard">
+          <div class="search-panel">
+            <div class="search-copy">
+              <p class="eyebrow">TROUBLE SEARCH</p>
+              <h2>困りごとを入力</h2>
+              <p>保存した取説・メモ・解決手順から、関連度が高い候補を表示します。</p>
+            </div>
+            <form id="searchForm" class="search-form">
+              <label for="troubleInput">症状や状況</label>
+              <div class="search-row">
+                <input id="troubleInput" name="troubleInput" type="search" placeholder="例: 給湯器のお湯が出ない、エアコンのフィルター掃除" autocomplete="off">
+                <button class="primary-button" type="submit">検索</button>
+              </div>
+            </form>
+          </div>
+          <section class="panel notification-panel">
+            <div>
+              <p class="eyebrow">REMINDER</p>
+              <h2>今日の予定通知</h2>
+              <p class="muted">この端末でアプリを開いている時に、今日・期限切れの予定を知らせます。</p>
+            </div>
+            <button id="enableNotifications" class="text-button" type="button">通知を有効にする</button>
+            <span class="muted" id="notificationStatus">通知: 未確認</span>
+          </section>
+
+          <div class="dashboard-grid">
+            <section class="panel results-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">BEST MATCH</p>
+                  <h2>AI解決候補</h2>
+                </div>
+                <span class="muted" id="resultCount">未検索</span>
+              </div>
+              <div id="results" class="results"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">NEXT CARE</p>
+                  <h2>近い予定</h2>
+                </div>
+                <button class="text-button" data-view-jump="calendar" type="button">開く</button>
+              </div>
+              <div id="upcomingList" class="stack-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="manuals">
+          <div class="section-layout">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">MANUALS</p>
+                  <h2>登録済みの取説</h2>
+                </div>
+                <span class="muted" id="manualCount">0件</span>
+              </div>
+              <div id="manualList" class="manual-list"></div>
+            </section>
+
+            <section class="panel form-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">ADD MANUAL</p>
+                  <h2>取説データを追加</h2>
+                </div>
+              </div>
+              <form id="manualForm" class="data-form">
+                <input name="id" type="hidden">
+                <label>設備名<input name="title" required placeholder="例: 浴室乾燥機"></label>
+                <label>場所<input name="room" required placeholder="例: 浴室"></label>
+                <label>分類<input name="category" required placeholder="例: 空調・水回り"></label>
+                <label>タグ<input name="tags" placeholder="例: フィルター, 換気, エラー"></label>
+                <label>よくある症状<textarea name="symptoms" required placeholder="1行に1つずつ入力"></textarea></label>
+                <label>解決手順<textarea name="steps" required placeholder="1行に1手順ずつ入力"></textarea></label>
+                <div class="camera-source">
+                  <span class="field-label">紙の取説を撮る</span>
+                  <label class="file-picker camera-button">
+                    <input id="sourceCamera" name="sourcePhoto" type="file" accept="image/*" capture="environment">
+                    カメラで撮影
+                  </label>
+                  <img id="sourcePreview" class="source-preview" alt="撮影した取説の一時プレビュー" hidden>
+                  <div class="task-actions">
+                    <button id="readManualPhoto" class="small-button" type="button" disabled>写真から読み取る</button>
+                    <button id="clearManualPhoto" class="small-button" type="button" disabled>写真を消す</button>
+                  </div>
+                  <p class="muted" id="ocrStatus">写真は保存しません。必要な内容だけメモへ転記します。</p>
+                </div>
+                <label>取説メモ・転記内容<textarea name="content" placeholder="品番、注意点、エラー番号、問い合わせ先など"></textarea></label>
+                <div class="task-actions">
+                  <button id="manualSubmitButton" class="primary-button" type="submit">取説を保存</button>
+                  <button id="cancelManualEdit" class="small-button" type="button" hidden>編集をやめる</button>
+                </div>
+              </form>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="calendar">
+          <div class="calendar-toolbar">
+            <button class="icon-button" id="prevMonth" type="button" aria-label="前の月">‹</button>
+            <h2 id="monthLabel"></h2>
+            <button class="icon-button" id="nextMonth" type="button" aria-label="次の月">›</button>
+          </div>
+
+          <div class="calendar-layout">
+            <section class="panel calendar-panel">
+              <div class="calendar-weekdays" aria-hidden="true">
+                <span>日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span>
+              </div>
+              <div id="calendarGrid" class="calendar-grid"></div>
+            </section>
+
+            <section class="panel form-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">MAINTENANCE</p>
+                  <h2>予定を追加</h2>
+                </div>
+              </div>
+              <form id="taskForm" class="data-form">
+                <input name="id" type="hidden">
+                <label>内容<input name="title" required placeholder="例: エアコンフィルター掃除"></label>
+                <label>場所<input name="area" required placeholder="例: リビング"></label>
+                <label>次回日<input name="nextDate" required type="date"></label>
+                <label>周期
+                  <select name="frequency">
+                    <option value="none">1回のみ</option>
+                    <option value="weekly">毎週</option>
+                    <option value="monthly">毎月</option>
+                    <option value="quarterly">3か月ごと</option>
+                    <option value="yearly">毎年</option>
+                  </select>
+                </label>
+                <label>種類
+                  <select name="kind">
+                    <option value="掃除">掃除</option>
+                    <option value="点検">点検</option>
+                    <option value="交換">交換</option>
+                    <option value="連絡">連絡</option>
+                  </select>
+                </label>
+                <div class="task-actions">
+                  <button id="taskSubmitButton" class="primary-button" type="submit">予定を保存</button>
+                  <button id="cancelTaskEdit" class="small-button" type="button" hidden>編集をやめる</button>
+                </div>
+              </form>
+              <div id="taskList" class="stack-list task-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="settings">
+          <div class="settings-grid">
+            <section class="panel">
+              <p class="eyebrow">EXPORT</p>
+              <h2>バックアップ</h2>
+              <p class="muted">登録した取説と予定をJSONで書き出します。</p>
+              <button id="exportData" class="primary-button" type="button">データを書き出す</button>
+            </section>
+            <section class="panel">
+              <p class="eyebrow">FAMILY</p>
+              <h2>家族共有</h2>
+              <form id="shareSettingsForm" class="data-form">
+                <label>共有サーバーURL<input id="shareUrlInput" name="shareUrl" type="url" placeholder="空欄ならこのアプリのURLを使用"></label>
+                <label>家族コード<input id="familyCodeInput" name="familyCode" type="password" autocomplete="off" placeholder="家族だけで決めた合言葉"></label>
+                <label class="checkbox-line"><input id="autoSyncInput" name="autoSync" type="checkbox"> 自動同期する</label>
+                <div class="task-actions">
+                  <button class="primary-button" type="submit">保存</button>
+                  <button id="pullSharedData" class="small-button" type="button">取り込み</button>
+                  <button id="pushSharedData" class="small-button" type="button">共有へ保存</button>
+                </div>
+              </form>
+              <p class="muted" id="shareStatus">共有: 未設定</p>
+            </section>
+            <section class="panel">
+              <p class="eyebrow">AI</p>
+              <h2>AI回答</h2>
+              <p class="muted">公開版ではAPIキーを端末に保存せず、サーバー側の設定でAI回答を使います。</p>
+              <button id="refreshAiStatus" class="text-button" type="button">状態を確認</button>
+              <p class="muted" id="aiSettingsStatus">AI回答: 確認中</p>
+            </section>
+            <section class="panel">
+              <p class="eyebrow">IMPORT</p>
+              <h2>復元</h2>
+              <p class="muted">書き出したJSONを読み込んで復元します。</p>
+              <label class="file-picker">
+                <input id="importData" type="file" accept="application/json">
+                JSONを選択
+              </label>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="emptyTemplate">
+      <div class="empty-state">
+        <strong>まだデータがありません</strong>
+        <span>取説や予定を追加するとここに表示されます。</span>
+      </div>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

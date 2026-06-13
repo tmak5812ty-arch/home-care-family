@@ -1,0 +1,14 @@
+{
+  "name": "home-care-family-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "家族で共有できる家の管理アプリ",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check app.js && node --check server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
