@@ -18,3 +18,7 @@ services:
         sync: false
       - key: SUPABASE_TABLE
         value: home_care_shared_data
+      - key: APP_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true

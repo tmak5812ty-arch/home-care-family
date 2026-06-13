@@ -10,7 +10,26 @@
     <link rel="manifest" href="./manifest.json">
     <link rel="stylesheet" href="./styles.css">
   </head>
-  <body>
+  <body class="auth-locked">
+    <div class="login-screen" id="loginScreen" hidden>
+      <form class="login-card" id="loginForm">
+        <div class="brand login-brand">
+          <span class="brand-mark" aria-hidden="true">⌂</span>
+          <div>
+            <strong>家の管理</strong>
+            <span>家族の取説と予定</span>
+          </div>
+        </div>
+        <div>
+          <p class="eyebrow">PRIVATE HOME LIBRARY</p>
+          <h1>家族だけの管理ノート</h1>
+          <p class="muted">パスワードを入力して開きます。</p>
+        </div>
+        <label>パスワード<input id="loginPassword" name="password" type="password" autocomplete="current-password" required></label>
+        <button class="primary-button" type="submit">ログイン</button>
+        <p class="muted" id="loginStatus"></p>
+      </form>
+    </div>
     <div class="app-shell">
       <aside class="rail" aria-label="メインナビゲーション">
         <div class="brand">
@@ -44,6 +63,32 @@
         </header>
 
         <section class="view active" id="dashboard">
+          <div class="today-strip">
+            <section class="panel today-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">TODAY</p>
+                  <h2>今日やること</h2>
+                </div>
+                <button class="text-button" data-action="quick-add-task" type="button">予定を追加</button>
+              </div>
+              <div id="todayTaskList" class="today-task-list"></div>
+            </section>
+            <section class="panel mini-calendar-panel">
+              <div class="panel-heading compact-heading">
+                <div>
+                  <p class="eyebrow">MONTH</p>
+                  <h2 id="miniMonthLabel"></h2>
+                </div>
+                <button class="text-button" data-view-jump="calendar" type="button">開く</button>
+              </div>
+              <div class="mini-calendar-weekdays" aria-hidden="true">
+                <span>日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span>
+              </div>
+              <div id="miniCalendarGrid" class="mini-calendar-grid"></div>
+            </section>
+          </div>
+
           <div class="search-panel">
             <div class="search-copy">
               <p class="eyebrow">TROUBLE SEARCH</p>
@@ -122,17 +167,18 @@
                 <label>よくある症状<textarea name="symptoms" required placeholder="1行に1つずつ入力"></textarea></label>
                 <label>解決手順<textarea name="steps" required placeholder="1行に1手順ずつ入力"></textarea></label>
                 <div class="camera-source">
-                  <span class="field-label">紙の取説を撮る</span>
+                  <span class="field-label">紙の取説をまとめて撮る</span>
                   <label class="file-picker camera-button">
-                    <input id="sourceCamera" name="sourcePhoto" type="file" accept="image/*" capture="environment">
-                    カメラで撮影
+                    <input id="sourceCamera" name="sourcePhoto" type="file" accept="image/*" capture="environment" multiple>
+                    写真を撮影・選択
                   </label>
+                  <div id="sourcePreviewList" class="source-preview-list"></div>
                   <img id="sourcePreview" class="source-preview" alt="撮影した取説の一時プレビュー" hidden>
                   <div class="task-actions">
-                    <button id="readManualPhoto" class="small-button" type="button" disabled>写真から読み取る</button>
+                    <button id="readManualPhoto" class="small-button" type="button" disabled>まとめて読み取る</button>
                     <button id="clearManualPhoto" class="small-button" type="button" disabled>写真を消す</button>
                   </div>
-                  <p class="muted" id="ocrStatus">写真は保存しません。必要な内容だけメモへ転記します。</p>
+                  <p class="muted" id="ocrStatus">複数ページを選べます。写真は保存せず、読み取った要点だけフォームへ転記します。</p>
                 </div>
                 <label>取説メモ・転記内容<textarea name="content" placeholder="品番、注意点、エラー番号、問い合わせ先など"></textarea></label>
                 <div class="task-actions">

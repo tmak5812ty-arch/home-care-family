@@ -90,6 +90,7 @@ const navItems = document.querySelectorAll(".nav-item");
 const emptyTemplate = document.querySelector("#emptyTemplate");
 const sourceCamera = document.querySelector("#sourceCamera");
 const sourcePreview = document.querySelector("#sourcePreview");
+const sourcePreviewList = document.querySelector("#sourcePreviewList");
 const manualForm = document.querySelector("#manualForm");
 const taskForm = document.querySelector("#taskForm");
 const readManualPhoto = document.querySelector("#readManualPhoto");
@@ -97,14 +98,18 @@ const clearManualPhoto = document.querySelector("#clearManualPhoto");
 const ocrStatus = document.querySelector("#ocrStatus");
 const notificationStatus = document.querySelector("#notificationStatus");
 let sourcePreviewUrl = "";
-let sourcePhotoDataUrl = "";
+let sourcePreviewUrls = [];
+let sourcePhotoDataUrls = [];
 let aiStatus = { enabled: false, model: "" };
+let authStatus = { required: false, authenticated: true };
 let syncTimer = null;
 let autoPullTimer = null;
 let reminderTimer = null;
 let notifiedTaskKeys = loadNotifiedTaskKeys();
 
 document.querySelector("#todayLabel").textContent = formatLongDate(new Date());
+
+initializeAuth();
 
 navItems.forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.view));
@@ -121,31 +126,30 @@ document.querySelector("#searchForm").addEventListener("submit", async (event) =
 });
 
 sourceCamera.addEventListener("change", async () => {
-  const file = sourceCamera.files[0];
   resetSourcePreview();
-  if (!file) return;
-  sourcePhotoDataUrl = await fileToDataUrl(file);
-  sourcePreviewUrl = URL.createObjectURL(file);
-  sourcePreview.src = sourcePreviewUrl;
-  sourcePreview.hidden = false;
+  const files = [...sourceCamera.files].slice(0, 12);
+  if (!files.length) return;
+  sourcePhotoDataUrls = await Promise.all(files.map(fileToDataUrl));
+  sourcePreviewUrls = files.map((file) => URL.createObjectURL(file));
+  renderSourcePreviews();
   readManualPhoto.disabled = false;
   clearManualPhoto.disabled = false;
-  ocrStatus.textContent = "写真を確認しました。読み取りボタンでメモへ転記できます。";
+  ocrStatus.textContent = `${files.length}枚の写真を確認しました。まとめて読み取れます。`;
 });
 
 readManualPhoto.addEventListener("click", async () => {
-  if (!sourcePhotoDataUrl) return;
+  if (!sourcePhotoDataUrls.length) return;
   if (!aiStatus.enabled) {
-    ocrStatus.textContent = "写真読み取りにはサーバー側のOpenAI APIキー設定が必要です。";
+    ocrStatus.textContent = "写真読み取りにはRenderの環境変数 OPENAI_API_KEY の設定が必要です。";
     return;
   }
   readManualPhoto.disabled = true;
-  ocrStatus.textContent = "写真を読み取っています。";
+  ocrStatus.textContent = `${sourcePhotoDataUrls.length}枚の写真を読み取っています。`;
   try {
     const response = await fetch("/api/ocr-manual", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageDataUrl: sourcePhotoDataUrl })
+      body: JSON.stringify({ imageDataUrls: sourcePhotoDataUrls })
     });
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
@@ -289,10 +293,13 @@ document.addEventListener("click", (event) => {
   if (!action) return;
   const { action: name, id } = action.dataset;
   if (name === "complete-task") completeTask(id);
+  if (name === "toggle-task") toggleTask(id);
   if (name === "delete-task") deleteTask(id);
   if (name === "delete-manual") deleteManual(id);
   if (name === "edit-manual") editManual(id);
   if (name === "edit-task") editTask(id);
+  if (name === "quick-add-task") quickAddTask();
+  if (name === "add-task-date") quickAddTask(id);
 });
 
 renderAll();
@@ -469,7 +476,9 @@ function renderAll() {
   renderManuals();
   renderTasks();
   renderCalendar();
+  renderMiniCalendar();
   renderUpcoming();
+  renderTodayTasks();
   document.querySelector("#manualCount").textContent = `${state.manuals.length}件`;
   scheduleReminders();
 }
@@ -491,7 +500,7 @@ async function renderResults(query) {
   if (query && aiStatus.enabled) {
     results.append(statusCard("AIが登録済み取説を読んで判断しています。"));
     try {
-      const sourceManuals = state.manuals.slice(0, 20);
+      const sourceManuals = state.manuals;
       const answer = await generateAiAnswer(query, sourceManuals);
       results.innerHTML = "";
       results.append(aiAnswerCard(answer));
@@ -576,6 +585,7 @@ function parseAiPayload(text) {
 }
 
 function aiAnswerCard(payload) {
+  const sources = Array.isArray(payload.sources) ? payload.sources : [];
   const article = document.createElement("article");
   article.className = "result-card best ai-card";
   article.innerHTML = `
@@ -587,6 +597,7 @@ function aiAnswerCard(payload) {
       <span class="badge">AI</span>
     </div>
     <div class="ai-answer">${formatAnswer(payload.answer)}</div>
+    ${sources.length ? `<p class="meta-line">根拠: ${sources.map(escapeHtml).join("、")}</p>` : ""}
     ${diagramMarkup(payload.diagram)}
   `;
   return article;
@@ -729,6 +740,38 @@ function renderUpcoming() {
   });
 }
 
+function renderTodayTasks() {
+  const list = document.querySelector("#todayTaskList");
+  if (!list) return;
+  list.innerHTML = "";
+  const todayKey = toDateKey(new Date());
+  const tasks = state.tasks
+    .filter((task) => task.nextDate <= todayKey)
+    .sort((a, b) => a.nextDate.localeCompare(b.nextDate));
+
+  if (!tasks.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state compact-empty";
+    empty.innerHTML = "<strong>今日の予定はありません</strong><span>カレンダーから追加できます。</span>";
+    list.append(empty);
+    return;
+  }
+
+  tasks.forEach((task) => {
+    const row = document.createElement("article");
+    row.className = `today-task ${isOverdue(task) ? "overdue" : ""}`;
+    row.innerHTML = `
+      <button class="check-button" data-action="toggle-task" data-id="${task.id}" type="button" aria-label="${escapeHtml(task.title)}を完了">✓</button>
+      <div>
+        <strong>${escapeHtml(task.title)}</strong>
+        <span>${escapeHtml(task.area)} / ${task.nextDate < todayKey ? "期限切れ" : "今日"} / ${frequencyLabel(task.frequency)}</span>
+      </div>
+      <button class="small-button" data-action="edit-task" data-id="${task.id}" type="button">編集</button>
+    `;
+    list.append(row);
+  });
+}
+
 function renderCalendar() {
   const grid = document.querySelector("#calendarGrid");
   const monthLabel = document.querySelector("#monthLabel");
@@ -758,6 +801,39 @@ function renderCalendar() {
       <span class="day-number">${date.getDate()}${dayTasks.length ? `<span>${dayTasks.length}件</span>` : ""}</span>
       ${dayTasks.map((task) => `<span class="event-pill ${isOverdue(task) ? "overdue" : ""}">${escapeHtml(task.title)}</span>`).join("")}
     `;
+    cell.dataset.action = "add-task-date";
+    cell.dataset.id = dateKey;
+    grid.append(cell);
+  }
+}
+
+function renderMiniCalendar() {
+  const grid = document.querySelector("#miniCalendarGrid");
+  const label = document.querySelector("#miniMonthLabel");
+  if (!grid || !label) return;
+  grid.innerHTML = "";
+  const todayKey = toDateKey(new Date());
+  const year = activeMonth.getFullYear();
+  const month = activeMonth.getMonth();
+  label.textContent = `${month + 1}月`;
+  const firstDay = new Date(year, month, 1);
+  const start = addDays(firstDay, -firstDay.getDay());
+
+  for (let i = 0; i < 42; i += 1) {
+    const date = addDays(start, i);
+    const dateKey = toDateKey(date);
+    const count = state.tasks.filter((task) => task.nextDate === dateKey).length;
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = [
+      "mini-day",
+      date.getMonth() !== month ? "outside" : "",
+      dateKey === todayKey ? "today" : "",
+      count ? "has-task" : ""
+    ].filter(Boolean).join(" ");
+    cell.dataset.action = "add-task-date";
+    cell.dataset.id = dateKey;
+    cell.innerHTML = `<span>${date.getDate()}</span>${count ? `<i>${count}</i>` : ""}`;
     grid.append(cell);
   }
 }
@@ -780,7 +856,7 @@ function taskMarkup(task, withActions) {
     </div>
     ${withActions ? `
       <div class="task-actions">
-        <button class="small-button" data-action="complete-task" data-id="${task.id}" type="button">完了</button>
+        <button class="small-button check-action" data-action="toggle-task" data-id="${task.id}" type="button">✓ 完了</button>
         <button class="small-button" data-action="edit-task" data-id="${task.id}" type="button">編集</button>
         <button class="small-button danger-button" data-action="delete-task" data-id="${task.id}" type="button">削除</button>
       </div>
@@ -835,6 +911,17 @@ function resetTaskForm() {
   document.querySelector("#cancelTaskEdit").hidden = true;
 }
 
+function quickAddTask(dateKey = "") {
+  resetTaskForm();
+  taskForm.elements.nextDate.value = dateKey || toDateKey(new Date());
+  switchView("calendar");
+  taskForm.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function toggleTask(id) {
+  completeTask(id);
+}
+
 function completeTask(id) {
   const task = state.tasks.find((item) => item.id === id);
   if (!task) return;
@@ -881,14 +968,27 @@ function resetSourcePreview() {
   if (sourcePreviewUrl) {
     URL.revokeObjectURL(sourcePreviewUrl);
   }
+  sourcePreviewUrls.forEach((url) => URL.revokeObjectURL(url));
   sourcePreviewUrl = "";
-  sourcePhotoDataUrl = "";
+  sourcePreviewUrls = [];
+  sourcePhotoDataUrls = [];
   sourcePreview.removeAttribute("src");
   sourcePreview.hidden = true;
+  sourcePreviewList.innerHTML = "";
   if (sourceCamera) sourceCamera.value = "";
   readManualPhoto.disabled = true;
   clearManualPhoto.disabled = true;
-  ocrStatus.textContent = "写真は保存しません。必要な内容だけメモへ転記します。";
+  ocrStatus.textContent = "複数ページを選べます。写真は保存せず、読み取った要点だけフォームへ転記します。";
+}
+
+function renderSourcePreviews() {
+  sourcePreviewList.innerHTML = "";
+  sourcePreviewUrls.forEach((url, index) => {
+    const figure = document.createElement("figure");
+    figure.className = "source-thumb";
+    figure.innerHTML = `<img src="${url}" alt="取説写真 ${index + 1}"><figcaption>${index + 1}</figcaption>`;
+    sourcePreviewList.append(figure);
+  });
 }
 
 function fileToDataUrl(file) {
@@ -917,6 +1017,49 @@ function applyOcrResult(data) {
   if (memoParts.length) {
     fields.content.value = [fields.content.value.trim(), memoParts.join("\n")].filter(Boolean).join("\n\n");
   }
+}
+
+async function initializeAuth() {
+  const loginScreen = document.querySelector("#loginScreen");
+  const loginForm = document.querySelector("#loginForm");
+  const loginStatus = document.querySelector("#loginStatus");
+  try {
+    const response = await fetch("/api/auth/status");
+    if (!response.ok) throw new Error(await response.text());
+    authStatus = await response.json();
+    if (authStatus.required && !authStatus.authenticated) {
+      loginScreen.hidden = false;
+      document.body.classList.add("auth-locked");
+    } else {
+      loginScreen.hidden = true;
+      document.body.classList.remove("auth-locked");
+    }
+  } catch {
+    authStatus = { required: false, authenticated: true };
+    loginScreen.hidden = true;
+    document.body.classList.remove("auth-locked");
+  }
+
+  loginForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    loginStatus.textContent = "確認しています。";
+    const password = new FormData(event.currentTarget).get("password");
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password })
+      });
+      if (!response.ok) throw new Error(await response.text());
+      loginScreen.hidden = true;
+      document.body.classList.remove("auth-locked");
+      loginStatus.textContent = "";
+      await renderAiSettings();
+      scheduleAutoPull();
+    } catch {
+      loginStatus.textContent = "パスワードが違います。";
+    }
+  });
 }
 
 async function enableNotifications() {

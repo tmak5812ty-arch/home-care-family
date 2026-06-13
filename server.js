@@ -12,6 +12,8 @@ const aiModel = process.env.OPENAI_MODEL || "gpt-5-mini";
 const supabaseUrl = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const supabaseTable = process.env.SUPABASE_TABLE || "home_care_shared_data";
+const appPassword = process.env.APP_PASSWORD || "";
+const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -26,7 +28,7 @@ function readBody(request) {
     let body = "";
     request.on("data", (chunk) => {
       body += chunk;
-      if (body.length > 8_000_000) {
+      if (body.length > 30_000_000) {
         reject(new Error("Request too large"));
       }
     });
@@ -61,6 +63,69 @@ function send(response, status, payload, contentType = "text/plain; charset=utf-
 
 function sendJson(response, status, payload) {
   send(response, status, JSON.stringify(payload), "application/json; charset=utf-8");
+}
+
+function parseCookies(request) {
+  return Object.fromEntries(String(request.headers.cookie || "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const index = part.indexOf("=");
+      return [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
+    }));
+}
+
+function signSession(value) {
+  return crypto.createHmac("sha256", sessionSecret).update(value).digest("hex");
+}
+
+function isAuthenticated(request) {
+  if (!appPassword) return true;
+  const session = parseCookies(request).home_care_session || "";
+  const [value, signature] = session.split(".");
+  if (!value || !signature) return false;
+  const expected = signSession(value);
+  return signature.length === expected.length
+    && crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+}
+
+function setSessionCookie(response) {
+  const value = crypto.randomBytes(24).toString("hex");
+  const cookie = `${value}.${signSession(value)}`;
+  response.setHeader("Set-Cookie", `home_care_session=${encodeURIComponent(cookie)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000`);
+}
+
+async function handleAuth(request, response, url) {
+  if (url.pathname === "/api/auth/status") {
+    sendJson(response, 200, {
+      required: Boolean(appPassword),
+      authenticated: isAuthenticated(request)
+    });
+    return true;
+  }
+
+  if (url.pathname === "/api/auth/login") {
+    if (request.method !== "POST") {
+      send(response, 405, "Method not allowed.");
+      return true;
+    }
+    const body = JSON.parse(await readBody(request) || "{}");
+    const password = String(body.password || "");
+    const ok = Boolean(appPassword) && crypto.timingSafeEqual(
+      Buffer.from(crypto.createHash("sha256").update(password).digest("hex")),
+      Buffer.from(crypto.createHash("sha256").update(appPassword).digest("hex"))
+    );
+    if (!ok) {
+      send(response, 401, "Invalid password.");
+      return true;
+    }
+    setSessionCookie(response);
+    sendJson(response, 200, { ok: true });
+    return true;
+  }
+
+  return false;
 }
 
 function familyHash(value) {
@@ -180,7 +245,12 @@ function aiResponseSchema() {
     properties: {
       answer: {
         type: "string",
-        description: "ユーザーに表示する日本語回答。結論、確認すること、手順、根拠資料、注意点を含める。"
+        description: "ユーザーに表示する日本語回答。資料に書かれていることだけで、結論、確認すること、手順、注意点を含める。"
+      },
+      sources: {
+        type: "array",
+        description: "回答根拠に使った資料名。根拠がなければ空配列。",
+        items: { type: "string" }
       },
       diagram: {
         type: "object",
@@ -217,7 +287,7 @@ function aiResponseSchema() {
         required: ["title", "nodes"]
       }
     },
-    required: ["answer", "diagram"]
+    required: ["answer", "sources", "diagram"]
   };
 }
 
@@ -285,8 +355,10 @@ async function handleAiAnswer(request, response) {
       model: aiModel,
       instructions: [
         "あなたは家庭設備の取扱説明書を読むアシスタントです。",
-        "必ずユーザーが登録した資料だけを根拠に回答してください。",
-        "資料にない断定は避け、不明点は不明と書いてください。",
+        "NotebookLMのように、必ずユーザーが登録した資料だけを根拠に回答してください。",
+        "資料にない情報、一般知識、推測、補完、経験則を回答に混ぜないでください。",
+        "資料だけで答えられない場合は、答えを作らず「登録済み資料からは判断できません」と書いてください。",
+        "回答内に、根拠に使った資料名を必ず含めてください。",
         "危険、ガス、電気、水漏れ、焦げ臭い、異音、発熱に関わる場合は、使用停止や専門業者への相談を優先してください。",
         "日本語で、結論、確認すること、手順、根拠資料、注意点の順に短く整理してください。",
         "配線、フィルター、弁、リモコン操作、確認順序など、文章だけでは迷いやすい場合は図解も付けてください。",
@@ -330,9 +402,11 @@ async function handleOcrManual(request, response) {
   }
 
   const body = JSON.parse(await readBody(request) || "{}");
-  const imageDataUrl = String(body.imageDataUrl || "");
-  if (!imageDataUrl.startsWith("data:image/")) {
-    send(response, 400, "Image data URL is required.");
+  const imageDataUrls = Array.isArray(body.imageDataUrls)
+    ? body.imageDataUrls.map(String).filter((value) => value.startsWith("data:image/")).slice(0, 12)
+    : [String(body.imageDataUrl || "")].filter((value) => value.startsWith("data:image/"));
+  if (!imageDataUrls.length) {
+    send(response, 400, "Image data URLs are required.");
     return;
   }
 
@@ -347,6 +421,8 @@ async function handleOcrManual(request, response) {
       instructions: [
         "あなたは家庭設備の取扱説明書、ラベル、保証書の写真から、家の管理アプリに保存する情報を抽出するアシスタントです。",
         "写真に読める内容だけを使い、読めない項目は空文字または空配列にしてください。",
+        "複数ページがある場合は、ページ間の重複を整理し、品番、エラー番号、警告、手順を取りこぼさないでください。",
+        "読みにくい文字は推測せず、contentに「判読不明」と明記してください。",
         "ユーザーが後から検索しやすいよう、症状、エラー番号、掃除、交換、点検、問い合わせ先を優先して抜き出してください。",
         "危険や注意書きが読める場合は必ず cautions に要約してください。",
         "日本語で短く整理してください。"
@@ -355,8 +431,8 @@ async function handleOcrManual(request, response) {
         {
           role: "user",
           content: [
-            { type: "input_text", text: "この写真から家の管理アプリに保存する取説データを抽出してください。" },
-            { type: "input_image", image_url: imageDataUrl }
+            { type: "input_text", text: `${imageDataUrls.length}枚の写真から家の管理アプリに保存する取説データを抽出してください。` },
+            ...imageDataUrls.map((image_url) => ({ type: "input_image", image_url }))
           ]
         }
       ],
@@ -385,7 +461,8 @@ function handleStatus(response) {
     ok: true,
     aiEnabled: Boolean(process.env.OPENAI_API_KEY),
     aiModel,
-    sharedStorage: hasSupabaseStore() ? "supabase" : "file"
+    sharedStorage: hasSupabaseStore() ? "supabase" : "file",
+    authRequired: Boolean(appPassword)
   });
 }
 
@@ -409,6 +486,13 @@ function handleStatic(request, response, url) {
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host}`);
+    if (await handleAuth(request, response, url)) {
+      return;
+    }
+    if (url.pathname.startsWith("/api/") && !isAuthenticated(request)) {
+      send(response, 401, "Authentication required.");
+      return;
+    }
     if (url.pathname === "/api/shared-data") {
       await handleApi(request, response, url);
       return;
