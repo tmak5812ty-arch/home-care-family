@@ -643,6 +643,10 @@ const server = http.createServer(async (request, response) => {
     if (await handleAuth(request, response, url)) {
       return;
     }
+    if (url.pathname === "/api/status") {
+      handleStatus(response);
+      return;
+    }
     if (url.pathname.startsWith("/api/") && !isAuthenticated(request)) {
       send(response, 401, "Authentication required.");
       return;
@@ -657,10 +661,6 @@ const server = http.createServer(async (request, response) => {
     }
     if (url.pathname === "/api/ocr-manual") {
       await handleOcrManual(request, response);
-      return;
-    }
-    if (url.pathname === "/api/status") {
-      handleStatus(response);
       return;
     }
     handleStatic(request, response, url);
