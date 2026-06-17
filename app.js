@@ -229,7 +229,7 @@ readManualPhoto.addEventListener("click", async () => {
       : "";
     ocrStatus.textContent = `AIが場所・分類・タグと内容を仮入力しました。${savedLabel} ${maintenanceLabel} 違うところだけ直して保存してください。`;
   } catch (error) {
-    ocrStatus.textContent = `読み取りに失敗しました。${error.message ? ` ${error.message.slice(0, 80)}` : ""}`;
+    ocrStatus.textContent = friendlySourceReadError(error);
   } finally {
     readManualPhoto.disabled = false;
   }
@@ -1211,6 +1211,21 @@ function updateSourceReadiness(resetMessage = false) {
   if (total > 0) {
     ocrStatus.textContent = `写真${sourcePhotoPayloads.length}枚、ファイル${sourceFilePayloads.length}件を確認しました。まとめて読み取れます。`;
   }
+}
+
+function friendlySourceReadError(error) {
+  const message = String(error?.message || "");
+  const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes("quota") || lowerMessage.includes("insufficient_quota")) {
+    return "読み取りに失敗しました。OpenAI APIの利用上限または支払い設定を確認してください。写真は選択できています。";
+  }
+  if (lowerMessage.includes("api key") || lowerMessage.includes("unauthorized") || lowerMessage.includes("401")) {
+    return "読み取りに失敗しました。Renderの OPENAI_API_KEY 設定を確認してください。";
+  }
+  if (lowerMessage.includes("too large") || lowerMessage.includes("413")) {
+    return "読み取りに失敗しました。写真が多すぎるか大きすぎます。枚数を少し減らして試してください。";
+  }
+  return `読み取りに失敗しました。${message ? ` ${message.slice(0, 120)}` : "少し時間を置いてもう一度試してください。"}`;
 }
 
 function fileToDataUrl(file) {
